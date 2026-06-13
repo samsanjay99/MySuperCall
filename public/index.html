@@ -363,7 +363,8 @@
       localAnalyser: null,
       remoteAnalyser: null,
       audioContext: null,
-      levelInterval: null
+      levelInterval: null,
+      isInitiator: false   // Only the original caller sends the WebRTC offer
     };
     let incomingCallData = null;
     let isRegistered = false;
@@ -420,8 +421,9 @@
         hideStatus();
         const otherId = fromId || targetId;
         
-        // We are the caller, start WebRTC negotiation now
-        if (!currentCall.peerConnection) {
+        // ONLY the original caller (initiator) starts the WebRTC offer.
+        // The callee must wait for the 'offer' event to avoid both sides offering at the same time.
+        if (currentCall.isInitiator && !currentCall.peerConnection) {
           startWebRTCCallAsCaller(otherId);
         }
 
@@ -445,17 +447,34 @@
       // ============== WebRTC SIGNALING ==============
       socket.on('offer', async ({ fromId, offer }) => {
         console.log('[WebRTC] Received offer from', fromId);
+        const pc = currentCall.peerConnection;
+
+        // If we are the initiator and already have a PC, ignore duplicate/late offers
+        // (prevents negotiation races)
+        if (currentCall.isInitiator && pc) {
+          console.warn('[WebRTC] Ignoring incoming offer as initiator (we sent the offer)');
+          return;
+        }
+
         await handleRemoteOffer(fromId, offer);
       });
 
       socket.on('answer', async ({ fromId, answer }) => {
         console.log('[WebRTC] Received answer from', fromId);
-        if (currentCall.peerConnection) {
-          try {
-            await currentCall.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-          } catch (e) {
-            console.error('Error setting remote answer', e);
-          }
+        const pc = currentCall.peerConnection;
+        if (!pc) return;
+
+        // Critical guard: only set answer when we are in 'have-local-offer' state.
+        // Setting answer in 'stable' (or other states) causes the "Called in wrong state: stable" error.
+        if (pc.signalingState !== 'have-local-offer') {
+          console.warn(`[WebRTC] Ignoring answer - wrong state: ${pc.signalingState} (expected have-local-offer)`);
+          return;
+        }
+
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        } catch (e) {
+          console.error('Error setting remote answer', e);
         }
       });
 
@@ -637,6 +656,7 @@
 
       // Prepare UI
       currentCall.peerId = targetId;
+      currentCall.isInitiator = true;   // We initiated the call → we will send the WebRTC offer
       document.getElementById('call-btn').disabled = true;
       showStatus(`Calling ${targetId}...`, 0);
 
@@ -691,6 +711,7 @@
 
       currentCall.localStream = localStream;
       currentCall.peerId = callerId;
+      currentCall.isInitiator = false;  // We are answering → we wait for the offer
 
       // Setup real local mic level visualization immediately
       setupLocalAudioLevelMeter();
@@ -828,6 +849,12 @@
       // This is only called when we are the callee (answerer)
       if (!currentCall.localStream) {
         console.warn('No local stream when offer received');
+        return;
+      }
+
+      // Guard: if we already have a PC (e.g. as initiator), don't create another
+      if (currentCall.peerConnection) {
+        console.warn('[WebRTC] Already have a peerConnection, ignoring duplicate offer');
         return;
       }
 
@@ -1232,7 +1259,8 @@
         localAnalyser: null,
         remoteAnalyser: null,
         audioContext: null,
-        levelInterval: null
+        levelInterval: null,
+        isInitiator: false
       };
 
       // Reset UI
