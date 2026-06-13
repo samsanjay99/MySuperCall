@@ -30,6 +30,15 @@ app.get('/api/online', (req, res) => {
   res.json({ online });
 });
 
+// Simple health check for Render / monitoring
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: Date.now(),
+    usersOnline: users.size 
+  });
+});
+
 io.on('connection', (socket) => {
   console.log(`Socket connected: ${socket.id}`);
 
