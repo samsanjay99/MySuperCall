@@ -728,6 +728,8 @@
       document.getElementById('incoming-modal').classList.add('hidden');
       incomingCallData = null;
 
+      stopRingTone();  // Stop ringing immediately on accept
+
       // Show call UI
       showActiveCallUI(callerId);
 
@@ -746,6 +748,8 @@
 
       document.getElementById('incoming-modal').classList.add('hidden');
       incomingCallData = null;
+
+      stopRingTone();  // Stop ringing immediately on reject
     }
 
     function showIncomingCallModal(fromId) {
@@ -758,6 +762,7 @@
 
     let ringAudioContext = null;
     let ringOscillator = null;
+    let ringInterval = null;
 
     function playRingTone() {
       try {
@@ -776,7 +781,7 @@
 
         gain.gain.value = 0.08;
 
-        const periodic = setInterval(() => {
+        ringInterval = setInterval(() => {
           if (ringOscillator) {
             ringOscillator.frequency.value = (ringOscillator.frequency.value === 780) ? 620 : 780;
           }
@@ -791,7 +796,10 @@
 
         // Stop after 12 seconds if not answered
         setTimeout(() => {
-          clearInterval(periodic);
+          if (ringInterval) {
+            clearInterval(ringInterval);
+            ringInterval = null;
+          }
           if (ringOscillator) {
             try { ringOscillator.stop(); } catch(e){}
             ringOscillator = null;
@@ -801,6 +809,10 @@
     }
 
     function stopRingTone() {
+      if (ringInterval) {
+        clearInterval(ringInterval);
+        ringInterval = null;
+      }
       if (ringOscillator) {
         try { ringOscillator.stop(); } catch(e){}
         ringOscillator = null;
@@ -922,9 +934,13 @@
         remoteAudio.srcObject = currentCall.remoteStream;
         remoteAudio.volume = 1.0;
 
+        // Setup "THEM" level meter immediately from the incoming track.
+        // This ensures the bar reacts as soon as remote audio data starts flowing.
+        if (!currentCall.remoteAnalyser) {
+          setupRemoteAudioLevelMeter();
+        }
+
         // === CRITICAL: Force play the remote audio (fixes silent calls) ===
-        // The remote level meter ("THEM") is started automatically inside ensureRemoteAudioPlaying
-        // only after the browser confirms the audio element is actually playing.
         ensureRemoteAudioPlaying(remoteAudio);
 
         // When we have audio flowing both ways, mark as fully connected
@@ -1059,41 +1075,12 @@
     }
 
     function setupRemoteAudioLevelMeter() {
-      const audioEl = document.getElementById('remote-audio');
-      if (!audioEl || currentCall.remoteAnalyser) return;
-
-      try {
-        if (!currentCall.audioContext) {
-          currentCall.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        const ctx = currentCall.audioContext;
-        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-
-        // Use MediaElementSource on the actual playing <audio> element.
-        // This is more reliable than stream source for seeing "their" audio energy
-        // because it reflects exactly what the browser is decoding and sending to speakers.
-        const source = ctx.createMediaElementSource(audioEl);
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 256;
-        analyser.minDecibels = -85;
-        analyser.maxDecibels = -15;
-        analyser.smoothingTimeConstant = 0.65;
-
-        source.connect(analyser);
-        // Important: connect analyser to destination so audio still reaches the speakers.
-        analyser.connect(ctx.destination);
-
-        currentCall.remoteAnalyser = analyser;
-
-        console.log('[Audio] Remote level meter (via audio element) started');
-      } catch (e) {
-        console.warn('Could not setup remote level meter via element, trying fallback', e);
-        tryFallbackRemoteStreamAnalyser();
-      }
-    }
-
-    function tryFallbackRemoteStreamAnalyser() {
+      // Use the raw remote WebRTC stream for the "THEM" visualizer.
+      // This directly measures the incoming audio energy from the other person's mic
+      // and is independent of the <audio> element volume or playback state.
+      // Much more reliable for showing when the remote user is speaking.
       if (!currentCall.remoteStream || currentCall.remoteAnalyser) return;
+
       try {
         if (!currentCall.audioContext) {
           currentCall.audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -1109,11 +1096,13 @@
         analyser.smoothingTimeConstant = 0.65;
 
         source.connect(analyser);
-        // Note: for fallback we don't connect to dest here because the <audio> element is already doing playback
+        // No need to connect analyser to destination - the <audio> element handles actual playback
+
         currentCall.remoteAnalyser = analyser;
-        console.log('[Audio] Remote level meter (fallback stream source) started');
+
+        console.log('[Audio] Remote level meter (stream source) started');
       } catch (e) {
-        console.warn('Fallback remote analyser also failed', e);
+        console.warn('Could not setup remote level meter from stream', e);
       }
     }
 
