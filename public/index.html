@@ -1,0 +1,1396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MyCall • Web Calling</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&amp;family=Space+Grotesk:wght@500;600&amp;display=swap');
+    
+    :root {
+      --primary: #6366f1;
+    }
+    
+    body {
+      font-family: 'Inter', system_ui, sans-serif;
+    }
+    
+    .font-display {
+      font-family: 'Space Grotesk', 'Inter', sans-serif;
+    }
+
+    .phone-container {
+      max-width: 420px;
+      margin: 0 auto;
+    }
+
+    .call-id {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      letter-spacing: 1.5px;
+    }
+
+    .status-dot {
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+
+    .glass {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(20px);
+    }
+
+    .dark-glass {
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(20px);
+    }
+
+    .section-card {
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .big-button {
+      transition: transform 0.1s ease, box-shadow 0.1s ease;
+    }
+    
+    .big-button:active {
+      transform: scale(0.985);
+    }
+
+    .audio-wave {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      height: 18px;
+    }
+    
+    .audio-wave span {
+      display: block;
+      width: 3px;
+      background: #6366f1;
+      animation: soundwave 1.2s infinite ease;
+      border-radius: 9999px;
+    }
+    
+    .audio-wave span:nth-child(2) { animation-delay: 0.2s; height: 12px; }
+    .audio-wave span:nth-child(3) { animation-delay: 0.4s; }
+    .audio-wave span:nth-child(4) { animation-delay: 0.1s; height: 8px; }
+
+    @keyframes soundwave {
+      0%, 100% { height: 4px; }
+      50% { height: 18px; }
+    }
+
+    .connected {
+      animation: callConnected 0.4s ease forwards;
+    }
+
+    .mic-muted {
+      color: #f87171;
+    }
+
+    .user-pill {
+      transition: all 0.1s ease;
+    }
+    
+    .user-pill:hover {
+      background-color: #e0e7ff;
+      transform: translateY(-1px);
+    }
+
+    .log-line {
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+    }
+
+    .modal {
+      animation: modalPop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    @keyframes modalPop {
+      from { transform: scale(0.9) translateY(20px); opacity: 0; }
+      to { transform: scale(1) translateY(0); opacity: 1; }
+    }
+
+    .rtc-stats {
+      font-size: 10px;
+      font-family: ui-monospace, monospace;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-200">
+  <div class="min-h-screen flex items-center justify-center p-4 bg-[radial-gradient(#1e2937_0.8px,transparent_1px)] bg-[length:3px_3px]">
+    <div class="w-full max-w-[440px]">
+      
+      <!-- Header -->
+      <div class="flex items-center justify-between mb-6 px-1">
+        <div class="flex items-center gap-x-3">
+          <div class="w-11 h-11 rounded-2xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+            <i class="fa-solid fa-phone text-white text-2xl"></i>
+          </div>
+          <div>
+            <h1 class="font-display text-3xl font-semibold tracking-tighter">MyCall</h1>
+            <p class="text-[10px] text-slate-500 -mt-1">REAL-TIME • TWO-WAY AUDIO</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-x-2 text-xs">
+          <div id="connection-status" 
+               class="flex items-center gap-x-1.5 px-3 py-1 rounded-full bg-slate-900 border border-slate-800">
+            <div class="w-2 h-2 rounded-full bg-emerald-400 status-dot"></div>
+            <span class="text-emerald-400 font-medium">Connected</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Your Call ID Card -->
+      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-5 mb-4 section-card">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <div class="text-xs font-semibold tracking-wider text-slate-400">YOUR UNIQUE CALL ID</div>
+            <div id="current-id-display" 
+                 class="call-id text-2xl font-semibold text-white mt-0.5 tracking-[2px] min-h-[32px]">
+              <span class="text-slate-500">not set</span>
+            </div>
+          </div>
+          <div>
+            <button onclick="copyCallId()" 
+                    class="px-3 py-1.5 text-xs flex items-center gap-x-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 transition-colors rounded-2xl border border-slate-700">
+              <i class="fa-solid fa-copy"></i>
+              <span class="font-medium">Copy</span>
+            </button>
+          </div>
+        </div>
+        
+        <div class="flex gap-2">
+          <input id="my-id-input" 
+                 type="text" 
+                 placeholder="Enter your Call ID (e.g. alice, bob, 4821)"
+                 class="flex-1 bg-slate-950 border border-slate-800 focus:border-indigo-600 text-white placeholder:text-slate-600 px-4 py-3 rounded-2xl text-sm outline-none">
+          
+          <button onclick="registerCallId()"
+                  class="px-6 bg-white hover:bg-slate-100 active:bg-slate-200 transition-colors text-slate-900 font-semibold rounded-2xl text-sm">
+            SET
+          </button>
+        </div>
+        <div class="mt-2 text-[10px] text-slate-500 px-1">
+          Pick any unique name. Use the same ID across devices/tabs to receive calls.
+        </div>
+      </div>
+
+      <!-- Online Users -->
+      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-5 mb-4 section-card">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-x-2">
+            <i class="fa-solid fa-users text-indigo-400"></i>
+            <span class="font-semibold text-sm">ONLINE NOW</span>
+          </div>
+          <div id="online-count" 
+               class="text-xs px-2.5 py-0.5 bg-slate-800 border border-slate-700 rounded-full text-slate-400 font-medium">0 online</div>
+        </div>
+        
+        <div id="online-users-list" 
+             class="flex flex-wrap gap-1.5 min-h-[42px]">
+          <div class="text-xs text-slate-500 px-1">No one else is online yet. Open another tab!</div>
+        </div>
+      </div>
+
+      <!-- Make a Call -->
+      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-5 mb-4 section-card">
+        <div class="text-xs font-semibold tracking-wider text-slate-400 mb-3">MAKE A CALL</div>
+        
+        <div class="flex gap-2">
+          <input id="target-id-input" 
+                 type="text" 
+                 placeholder="Enter their Call ID"
+                 class="flex-1 bg-slate-950 border border-slate-800 focus:border-emerald-600 text-white placeholder:text-slate-600 px-4 py-3.5 rounded-2xl text-sm outline-none">
+          
+          <button onclick="startCall()"
+                  id="call-btn"
+                  class="px-8 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-all font-semibold text-white rounded-2xl flex items-center gap-x-2 shadow-lg shadow-emerald-600/30 disabled:opacity-50 disabled:cursor-not-allowed">
+            <i class="fa-solid fa-phone"></i>
+            <span class="font-semibold">CALL</span>
+          </button>
+        </div>
+        <div id="call-status" class="mt-3 text-xs px-1 text-emerald-400 hidden"></div>
+      </div>
+
+      <!-- Active Call Panel -->
+      <div id="active-call-panel" class="hidden bg-slate-900 border border-slate-700 rounded-3xl p-5 mb-4 section-card">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <div class="text-xs text-slate-400 tracking-wider">IN CALL WITH</div>
+            <div id="peer-id-display" class="call-id text-2xl font-semibold text-emerald-400 tracking-[1.5px]"></div>
+          </div>
+          
+          <div class="text-right">
+            <div id="call-timer" class="text-3xl font-mono font-semibold tabular-nums text-white">00:00</div>
+            <div class="text-[10px] text-emerald-400">LIVE</div>
+          </div>
+        </div>
+
+        <!-- Real Audio Level Meters -->
+        <div class="py-3 mb-1">
+          <div class="grid grid-cols-2 gap-4">
+            <!-- Your Mic Level -->
+            <div>
+              <div class="flex items-center justify-between mb-1 px-0.5">
+                <div class="flex items-center gap-x-1.5 text-[10px] text-slate-400">
+                  <i class="fa-solid fa-microphone"></i>
+                  <span>YOU</span>
+                </div>
+                <span id="local-level-text" class="text-[10px] tabular-nums font-mono text-slate-500">0</span>
+              </div>
+              <div class="h-2.5 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+                <div id="local-level-bar" class="h-2.5 w-0 bg-emerald-500 transition-all duration-75 rounded-full" style="width: 0%"></div>
+              </div>
+            </div>
+
+            <!-- Their Audio Level -->
+            <div>
+              <div class="flex items-center justify-between mb-1 px-0.5">
+                <div class="flex items-center gap-x-1.5 text-[10px] text-emerald-400">
+                  <i class="fa-solid fa-volume-up"></i>
+                  <span>THEM</span>
+                </div>
+                <span id="remote-level-text" class="text-[10px] tabular-nums font-mono text-emerald-500/70">0</span>
+              </div>
+              <div class="h-2.5 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+                <div id="remote-level-bar" class="h-2.5 w-0 bg-indigo-400 transition-all duration-75 rounded-full" style="width: 0%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Remote Volume + Force Play -->
+        <div class="flex items-center gap-2 mb-3 px-1">
+          <div class="flex items-center gap-2 flex-1">
+            <i class="fa-solid fa-volume-down text-xs text-slate-500"></i>
+            <input type="range" id="volume-slider" min="0" max="100" value="100" 
+                   class="flex-1 accent-indigo-500 cursor-pointer"
+                   oninput="setRemoteVolume(this.value)">
+            <i class="fa-solid fa-volume-up text-xs text-slate-500"></i>
+          </div>
+          <button id="force-audio-btn"
+                  onclick="forcePlayRemoteAudio()"
+                  class="text-[10px] px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 active:bg-amber-500/40 text-amber-400 border border-amber-500/40 rounded-xl font-medium transition">
+            <i class="fa-solid fa-play mr-1"></i> PLAY / RESTART AUDIO
+          </button>
+        </div>
+
+        <div class="text-[10px] text-center text-slate-500 -mt-1 mb-1">
+          If THEM bar is stuck or no sound, click the yellow button above.
+        </div>
+
+        <div class="flex gap-3 mt-4">
+          <button onclick="toggleMute()"
+                  id="mute-btn"
+                  class="flex-1 flex items-center justify-center gap-x-2 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 active:bg-slate-900 border border-slate-700 font-medium text-sm transition">
+            <i class="fa-solid fa-microphone" id="mute-icon"></i>
+            <span id="mute-text">Mute</span>
+          </button>
+          
+          <button onclick="endCall()"
+                  class="flex-1 flex items-center justify-center gap-x-2 py-3.5 rounded-2xl bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-semibold text-sm shadow-lg shadow-red-600/40 transition">
+            <i class="fa-solid fa-phone-slash"></i>
+            <span>End Call</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Incoming Call Modal -->
+      <div id="incoming-modal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="modal w-full max-w-[360px] bg-slate-900 border border-slate-700 rounded-3xl p-6">
+          <div class="text-center">
+            <div class="mx-auto w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mb-4">
+              <i class="fa-solid fa-phone text-emerald-400 fa-2x"></i>
+            </div>
+            
+            <div class="text-lg font-semibold mb-1">Incoming Call</div>
+            <div id="incoming-from" class="call-id text-3xl font-semibold text-emerald-400 tracking-wider mb-1"></div>
+            <div class="text-xs text-slate-500 mb-6">wants to talk with you</div>
+
+            <div class="flex gap-3">
+              <button onclick="rejectCall()"
+                      class="flex-1 py-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 transition font-semibold rounded-2xl border border-slate-700">
+                <i class="fa-solid fa-times mr-2"></i> Decline
+              </button>
+              <button onclick="acceptCall()"
+                      class="flex-1 py-4 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition font-semibold rounded-2xl text-white">
+                <i class="fa-solid fa-phone mr-2"></i> Accept
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Status Messages -->
+      <div id="status-box" 
+           class="hidden text-center text-xs text-slate-400 bg-slate-900 border border-slate-800 px-4 py-2 rounded-2xl mb-3"></div>
+
+      <!-- Quick Info + Testing Advice -->
+      <div class="px-2 text-center">
+        <div class="text-[10px] text-slate-600">
+          <span class="font-medium text-slate-500">Fully peer-to-peer WebRTC audio.</span><br>
+          <span class="text-amber-400/80">For best results on same computer:</span> Use headphones on one tab/device.<br>
+          Open two different tabs or devices → set different Call IDs → CALL.
+        </div>
+      </div>
+      
+    </div>
+  </div>
+
+  <!-- Hidden audio element for remote stream -->
+  <audio id="remote-audio" autoplay playsinline></audio>
+
+  <script>
+    // Tailwind script
+    function initTailwind() {
+      document.documentElement.style.setProperty('--accent', '#6366f1');
+    }
+
+    // ============== STATE ==============
+    let socket = null;
+    let myCallId = null;
+    let currentCall = {
+      peerId: null,
+      peerConnection: null,
+      localStream: null,
+      remoteStream: null,
+      isMuted: false,
+      timerInterval: null,
+      startTime: null,
+      localAnalyser: null,
+      remoteAnalyser: null,
+      audioContext: null,
+      levelInterval: null
+    };
+    let incomingCallData = null;
+    let isRegistered = false;
+
+    // ============== SOCKET CONNECTION ==============
+    function connectSocket() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      // When served by our server, just use relative
+      socket = io();
+
+      socket.on('connect', () => {
+        updateConnectionStatus(true);
+        showStatus('Connected to signaling server', 1400);
+      });
+
+      socket.on('disconnect', () => {
+        updateConnectionStatus(false);
+        showStatus('Disconnected from server', 2000);
+      });
+
+      // Registration response is handled via callback
+
+      socket.on('online-users', ({ users }) => {
+        renderOnlineUsers(users);
+      });
+
+      socket.on('user-left', ({ callId }) => {
+        if (currentCall.peerId === callId) {
+          showStatus(`Peer ${callId} left. Call ended.`, 2500);
+          cleanupCall();
+        }
+        // Refresh list
+        socket.emit('get-online-users', (res) => {
+          if (res && res.users) renderOnlineUsers(res.users);
+        });
+      });
+
+      // Incoming call notification
+      socket.on('incoming-call', (data) => {
+        if (currentCall.peerId) {
+          // Already busy — auto reject politely
+          socket.emit('answer-call', { targetId: data.fromId, accept: false, fromId: myCallId });
+          return;
+        }
+        incomingCallData = data;
+        showIncomingCallModal(data.fromId);
+      });
+
+      socket.on('call-initiated', ({ targetId }) => {
+        showStatus(`Ringing ${targetId}...`, 0);
+      });
+
+      socket.on('call-accepted', ({ fromId, targetId }) => {
+        hideStatus();
+        const otherId = fromId || targetId;
+        
+        // We are the caller, start WebRTC negotiation now
+        if (!currentCall.peerConnection) {
+          startWebRTCCallAsCaller(otherId);
+        }
+
+        // Extra: if remote audio somehow already exists, force play (defensive)
+        setTimeout(() => {
+          const ra = document.getElementById('remote-audio');
+          if (ra && ra.srcObject) ensureRemoteAudioPlaying(ra);
+        }, 1200);
+      });
+
+      socket.on('call-rejected', ({ fromId }) => {
+        showStatus(`${fromId} declined the call.`, 2200);
+        cleanupCall();
+      });
+
+      socket.on('call-error', ({ message }) => {
+        showStatus(message, 2800);
+        cleanupCall();
+      });
+
+      // ============== WebRTC SIGNALING ==============
+      socket.on('offer', async ({ fromId, offer }) => {
+        console.log('[WebRTC] Received offer from', fromId);
+        await handleRemoteOffer(fromId, offer);
+      });
+
+      socket.on('answer', async ({ fromId, answer }) => {
+        console.log('[WebRTC] Received answer from', fromId);
+        if (currentCall.peerConnection) {
+          try {
+            await currentCall.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+          } catch (e) {
+            console.error('Error setting remote answer', e);
+          }
+        }
+      });
+
+      socket.on('ice-candidate', async ({ fromId, candidate }) => {
+        if (currentCall.peerConnection && candidate) {
+          try {
+            await currentCall.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {
+            // Silently ignore (common race)
+          }
+        }
+      });
+
+      socket.on('hangup', ({ fromId }) => {
+        if (currentCall.peerId === fromId || currentCall.peerId) {
+          showStatus('Call ended by other party.', 1500);
+          cleanupCall();
+        }
+      });
+
+      // Initial online list
+      socket.on('connect', () => {
+        setTimeout(() => {
+          if (socket && myCallId) {
+            socket.emit('get-online-users', (res) => {
+              if (res?.users) renderOnlineUsers(res.users);
+            });
+          }
+        }, 600);
+      });
+    }
+
+    function updateConnectionStatus(connected) {
+      const el = document.getElementById('connection-status');
+      if (!el) return;
+      
+      if (connected) {
+        el.innerHTML = `<div class="w-2 h-2 rounded-full bg-emerald-400 status-dot"></div><span class="text-emerald-400 font-medium">Connected</span>`;
+      } else {
+        el.innerHTML = `<div class="w-2 h-2 rounded-full bg-red-400"></div><span class="text-red-400 font-medium">Offline</span>`;
+      }
+    }
+
+    // ============== REGISTRATION ==============
+    async function registerCallId() {
+      const input = document.getElementById('my-id-input');
+      const value = input.value.trim();
+
+      if (!value || value.length < 2) {
+        alert('Please enter a Call ID with at least 2 characters.');
+        return;
+      }
+
+      if (!socket || !socket.connected) {
+        alert('Not connected to server. Refresh the page.');
+        return;
+      }
+
+      // If already registered with same ID, just ignore
+      if (myCallId === value) {
+        showStatus('Already using this Call ID', 1200);
+        return;
+      }
+
+      socket.emit('register', value, (response) => {
+        if (response && response.success) {
+          myCallId = response.callId;
+          isRegistered = true;
+          
+          // Update UI
+          document.getElementById('current-id-display').innerHTML = 
+            `<span class="text-emerald-400">${myCallId}</span>`;
+          input.value = '';
+          input.placeholder = 'Change your Call ID...';
+          
+          showStatus(`You are now reachable as "${myCallId}"`, 1800);
+
+          // Request current online list
+          socket.emit('get-online-users', (res) => {
+            if (res && res.users) renderOnlineUsers(res.users);
+          });
+        } else {
+          alert(response?.error || 'Failed to register Call ID');
+        }
+      });
+    }
+
+    function copyCallId() {
+      if (!myCallId) {
+        alert('Set your Call ID first!');
+        return;
+      }
+      navigator.clipboard.writeText(myCallId).then(() => {
+        const orig = document.getElementById('current-id-display').innerHTML;
+        showStatus(`Copied "${myCallId}" to clipboard`, 1300);
+      });
+    }
+
+    // ============== ONLINE USERS ==============
+    function renderOnlineUsers(users) {
+      const container = document.getElementById('online-users-list');
+      const countEl = document.getElementById('online-count');
+      
+      if (!container || !countEl) return;
+
+      const filtered = (users || []).filter(u => u !== myCallId);
+      
+      countEl.textContent = `${filtered.length} online`;
+
+      if (filtered.length === 0) {
+        container.innerHTML = `<div class="text-xs text-slate-500 px-1">No one else is online yet. Open another tab or device!</div>`;
+        return;
+      }
+
+      container.innerHTML = '';
+      filtered.forEach(userId => {
+        const pill = document.createElement('div');
+        pill.className = `user-pill px-3 py-1 bg-slate-800 border border-slate-700 rounded-2xl text-xs flex items-center gap-x-1.5 cursor-pointer`;
+        pill.innerHTML = `
+          <i class="fa-solid fa-circle text-emerald-400 text-[9px]"></i>
+          <span class="font-medium">${userId}</span>
+        `;
+        pill.onclick = () => {
+          document.getElementById('target-id-input').value = userId;
+          // Auto start call on double click? No, single is fine — user presses CALL
+        };
+        container.appendChild(pill);
+      });
+    }
+
+    // ============== CALLING FLOW ==============
+    async function startCall() {
+      if (!isRegistered || !myCallId) {
+        alert('Please set your unique Call ID first.');
+        document.getElementById('my-id-input').focus();
+        return;
+      }
+
+      const targetInput = document.getElementById('target-id-input');
+      const targetId = targetInput.value.trim();
+
+      if (!targetId) {
+        alert('Enter the Call ID you want to call.');
+        return;
+      }
+      if (targetId === myCallId) {
+        alert('You cannot call yourself.');
+        return;
+      }
+
+      // Get microphone access early
+      let localStream;
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ 
+          audio: { 
+            echoCancellation: true, 
+            noiseSuppression: true, 
+            autoGainControl: true 
+          } 
+        });
+      } catch (err) {
+        console.error(err);
+        alert('Microphone access is required to make calls.\n\nPlease allow microphone permission and try again.');
+        return;
+      }
+
+      // Store local stream
+      if (currentCall.localStream) {
+        currentCall.localStream.getTracks().forEach(t => t.stop());
+      }
+      currentCall.localStream = localStream;
+
+      // Setup real local mic level visualization
+      setupLocalAudioLevelMeter();
+      startLevelMeters();
+
+      // Tell server we want to call
+      socket.emit('call-user', { targetId, fromId: myCallId });
+
+      // Prepare UI
+      currentCall.peerId = targetId;
+      document.getElementById('call-btn').disabled = true;
+      showStatus(`Calling ${targetId}...`, 0);
+
+      // Show the call panel early (will show ringing state)
+      showActiveCallUI(targetId, true);
+    }
+
+    function showActiveCallUI(peerId, isRinging = false) {
+      document.getElementById('active-call-panel').classList.remove('hidden');
+      document.getElementById('peer-id-display').textContent = peerId;
+      
+      // Make sure the "PLAY / RESTART AUDIO" button is visible during the call
+      const forceBtn = document.getElementById('force-audio-btn');
+      if (forceBtn) forceBtn.classList.remove('hidden');
+
+      if (isRinging) {
+        document.getElementById('call-timer').textContent = 'RINGING';
+        document.getElementById('call-timer').classList.add('text-amber-400');
+      }
+    }
+
+    function hideActiveCallUI() {
+      const panel = document.getElementById('active-call-panel');
+      panel.classList.add('hidden');
+      document.getElementById('call-timer').classList.remove('text-amber-400');
+      document.getElementById('call-timer').textContent = '00:00';
+
+      const forceBtn = document.getElementById('force-audio-btn');
+      if (forceBtn) forceBtn.classList.add('hidden');
+    }
+
+    async function acceptCall() {
+      if (!incomingCallData) return;
+
+      const callerId = incomingCallData.fromId;
+
+      // Get local microphone
+      let localStream;
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ 
+          audio: { 
+            echoCancellation: true, 
+            noiseSuppression: true, 
+            autoGainControl: true 
+          } 
+        });
+      } catch (err) {
+        alert('Microphone access denied. Cannot answer the call.');
+        rejectCall();
+        return;
+      }
+
+      currentCall.localStream = localStream;
+      currentCall.peerId = callerId;
+
+      // Setup real local mic level visualization immediately
+      setupLocalAudioLevelMeter();
+      startLevelMeters();
+
+      // Accept on server
+      socket.emit('answer-call', { 
+        targetId: callerId, 
+        accept: true, 
+        fromId: myCallId 
+      });
+
+      // Hide modal
+      document.getElementById('incoming-modal').classList.add('hidden');
+      incomingCallData = null;
+
+      // Show call UI
+      showActiveCallUI(callerId);
+
+      // As the answerer, wait for offer from caller (handled in socket listener)
+      showStatus(`Connected with ${callerId}. Waiting for connection...`, 0);
+    }
+
+    function rejectCall() {
+      if (!incomingCallData) return;
+
+      socket.emit('answer-call', { 
+        targetId: incomingCallData.fromId, 
+        accept: false, 
+        fromId: myCallId 
+      });
+
+      document.getElementById('incoming-modal').classList.add('hidden');
+      incomingCallData = null;
+    }
+
+    function showIncomingCallModal(fromId) {
+      document.getElementById('incoming-from').textContent = fromId;
+      document.getElementById('incoming-modal').classList.remove('hidden');
+      
+      // Optional ring sound (simple beep using Web Audio)
+      playRingTone();
+    }
+
+    let ringAudioContext = null;
+    let ringOscillator = null;
+
+    function playRingTone() {
+      try {
+        if (!ringAudioContext) ringAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+        if (ringOscillator) ringOscillator.stop();
+
+        ringOscillator = ringAudioContext.createOscillator();
+        const gain = ringAudioContext.createGain();
+        const filter = ringAudioContext.createBiquadFilter();
+
+        ringOscillator.type = 'sawtooth';
+        ringOscillator.frequency.value = 780;
+        
+        filter.type = 'lowpass';
+        filter.frequency.value = 1200;
+
+        gain.gain.value = 0.08;
+
+        const periodic = setInterval(() => {
+          if (ringOscillator) {
+            ringOscillator.frequency.value = (ringOscillator.frequency.value === 780) ? 620 : 780;
+          }
+        }, 380);
+
+        const destination = ringAudioContext.destination;
+        ringOscillator.connect(filter);
+        filter.connect(gain);
+        gain.connect(destination);
+
+        ringOscillator.start();
+
+        // Stop after 12 seconds if not answered
+        setTimeout(() => {
+          clearInterval(periodic);
+          if (ringOscillator) {
+            try { ringOscillator.stop(); } catch(e){}
+            ringOscillator = null;
+          }
+        }, 12500);
+      } catch(e) {}
+    }
+
+    function stopRingTone() {
+      if (ringOscillator) {
+        try { ringOscillator.stop(); } catch(e){}
+        ringOscillator = null;
+      }
+    }
+
+    // ============== WebRTC CORE ==============
+    async function startWebRTCCallAsCaller(targetId) {
+      if (!currentCall.localStream) {
+        console.error('No local stream for caller');
+        return;
+      }
+
+      const pc = createPeerConnection(targetId);
+      currentCall.peerConnection = pc;
+
+      // Add local audio tracks
+      currentCall.localStream.getTracks().forEach(track => {
+        pc.addTrack(track, currentCall.localStream);
+      });
+
+      // Create offer
+      try {
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: false
+        });
+        await pc.setLocalDescription(offer);
+
+        // Send offer
+        socket.emit('offer', { 
+          targetId, 
+          offer: pc.localDescription,
+          fromId: myCallId 
+        });
+
+        console.log('[WebRTC] Offer sent to', targetId);
+      } catch (err) {
+        console.error('Failed to create/send offer', err);
+        showStatus('Failed to establish call.', 2000);
+        cleanupCall();
+      }
+    }
+
+    async function handleRemoteOffer(fromId, offer) {
+      // This is only called when we are the callee (answerer)
+      if (!currentCall.localStream) {
+        console.warn('No local stream when offer received');
+        return;
+      }
+
+      const pc = createPeerConnection(fromId);
+      currentCall.peerConnection = pc;
+
+      // Add local tracks
+      currentCall.localStream.getTracks().forEach(track => {
+        pc.addTrack(track, currentCall.localStream);
+      });
+
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        // Send answer back
+        socket.emit('answer', { 
+          targetId: fromId, 
+          answer: pc.localDescription,
+          fromId: myCallId 
+        });
+
+        console.log('[WebRTC] Answer sent to', fromId);
+        
+        // Start timer now that we have negotiated
+        startCallTimer();
+        hideStatus();
+      } catch (err) {
+        console.error('Error handling remote offer', err);
+        cleanupCall();
+      }
+    }
+
+    function createPeerConnection(remoteId) {
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' }
+        ]
+      });
+
+      // ICE candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit('ice-candidate', {
+            targetId: remoteId,
+            candidate: event.candidate,
+            fromId: myCallId
+          });
+        }
+      };
+
+      // Remote tracks (audio)
+      pc.ontrack = (event) => {
+        console.log('[WebRTC] Remote track received');
+        if (!currentCall.remoteStream) {
+          currentCall.remoteStream = new MediaStream();
+        }
+        currentCall.remoteStream.addTrack(event.track);
+
+        const remoteAudio = document.getElementById('remote-audio');
+        remoteAudio.srcObject = currentCall.remoteStream;
+        remoteAudio.volume = 1.0;
+
+        // === CRITICAL: Force play the remote audio (fixes silent calls) ===
+        // The remote level meter ("THEM") is started automatically inside ensureRemoteAudioPlaying
+        // only after the browser confirms the audio element is actually playing.
+        ensureRemoteAudioPlaying(remoteAudio);
+
+        // When we have audio flowing both ways, mark as fully connected
+        if (currentCall.startTime === null) {
+          startCallTimer();
+        }
+        hideStatus();
+      };
+
+      pc.onconnectionstatechange = () => {
+        console.log('[WebRTC] Connection state:', pc.connectionState);
+        if (pc.connectionState === 'connected') {
+          hideStatus();
+          // Extra safety: try to play audio + setup remote meter when fully connected
+          const ra = document.getElementById('remote-audio');
+          if (ra && ra.srcObject) {
+            ensureRemoteAudioPlaying(ra);
+            setTimeout(() => {
+              if (!currentCall.remoteAnalyser) {
+                setupRemoteAudioLevelMeter();
+              }
+            }, 300);
+          }
+        }
+        if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
+          if (currentCall.peerId) {
+            showStatus('Connection lost.', 1600);
+          }
+          cleanupCall();
+        }
+      };
+
+      return pc;
+    }
+
+    // ============== ROBUST AUDIO PLAYBACK (fixes silent audio) ==============
+    function ensureRemoteAudioPlaying(audioEl) {
+      if (!audioEl) return;
+      audioEl.muted = false;
+      audioEl.volume = 1.0;
+
+      const tryPlay = () => {
+        const promise = audioEl.play();
+        if (promise && typeof promise.then === 'function') {
+          promise.then(() => {
+            console.log('[Audio] Remote audio playing successfully');
+            // Setup the remote "THEM" visualizer only after the audio element is actively playing.
+            // This dramatically improves reliability of the remote level meter.
+            setTimeout(() => {
+              if (!currentCall.remoteAnalyser) {
+                setupRemoteAudioLevelMeter();
+              }
+            }, 80);
+          }).catch((err) => {
+            console.warn('[Audio] Autoplay blocked by browser:', err.name);
+          });
+        }
+      };
+
+      // Try immediately
+      tryPlay();
+
+      // Also try once more shortly after (helps some browsers)
+      setTimeout(tryPlay, 180);
+      setTimeout(tryPlay, 650);
+    }
+
+    function forcePlayRemoteAudio() {
+      const audioEl = document.getElementById('remote-audio');
+      if (!audioEl) return;
+
+      audioEl.muted = false;
+      audioEl.volume = 1.0;
+
+      audioEl.play().then(() => {
+        console.log('[Audio] User-forced playback succeeded');
+        // Setup remote visualizer now that playback is confirmed (this powers the "THEM" level bar)
+        if (!currentCall.remoteAnalyser) {
+          setupRemoteAudioLevelMeter();
+        }
+      }).catch(e => {
+        console.error('[Audio] Force play still failed:', e);
+        alert('Audio playback blocked. Please click anywhere on the page or try again.');
+      });
+    }
+
+    function showForceAudioButton() {
+      // Button is now always visible during a call (via showActiveCallUI)
+      const btn = document.getElementById('force-audio-btn');
+      if (btn) btn.classList.remove('hidden');
+    }
+
+    function hideForceAudioButton() {
+      // We keep the button visible during calls as "PLAY / RESTART AUDIO" for reliability
+      // Only hide when call ends.
+    }
+
+    function setRemoteVolume(val) {
+      const audioEl = document.getElementById('remote-audio');
+      if (audioEl) {
+        audioEl.volume = parseInt(val, 10) / 100;
+      }
+    }
+
+    // ============== REAL AUDIO LEVEL METERS (Web Audio API) ==============
+    function setupLocalAudioLevelMeter() {
+      if (!currentCall.localStream || currentCall.localAnalyser) return;
+
+      try {
+        if (!currentCall.audioContext) {
+          currentCall.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const ctx = currentCall.audioContext;
+
+        // Resume context on user gesture environments
+        if (ctx.state === 'suspended') ctx.resume();
+
+        const source = ctx.createMediaStreamSource(currentCall.localStream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.minDecibels = -80;
+        analyser.maxDecibels = -20;
+        analyser.smoothingTimeConstant = 0.7;
+
+        source.connect(analyser);
+        currentCall.localAnalyser = analyser;
+
+        console.log('[Audio] Local mic level meter started');
+      } catch (e) {
+        console.warn('Could not setup local level meter', e);
+      }
+    }
+
+    function setupRemoteAudioLevelMeter() {
+      const audioEl = document.getElementById('remote-audio');
+      if (!audioEl || currentCall.remoteAnalyser) return;
+
+      try {
+        if (!currentCall.audioContext) {
+          currentCall.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const ctx = currentCall.audioContext;
+        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+        // Use MediaElementSource on the actual playing <audio> element.
+        // This is more reliable than stream source for seeing "their" audio energy
+        // because it reflects exactly what the browser is decoding and sending to speakers.
+        const source = ctx.createMediaElementSource(audioEl);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.minDecibels = -85;
+        analyser.maxDecibels = -15;
+        analyser.smoothingTimeConstant = 0.65;
+
+        source.connect(analyser);
+        // Important: connect analyser to destination so audio still reaches the speakers.
+        analyser.connect(ctx.destination);
+
+        currentCall.remoteAnalyser = analyser;
+
+        console.log('[Audio] Remote level meter (via audio element) started');
+      } catch (e) {
+        console.warn('Could not setup remote level meter via element, trying fallback', e);
+        tryFallbackRemoteStreamAnalyser();
+      }
+    }
+
+    function tryFallbackRemoteStreamAnalyser() {
+      if (!currentCall.remoteStream || currentCall.remoteAnalyser) return;
+      try {
+        if (!currentCall.audioContext) {
+          currentCall.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const ctx = currentCall.audioContext;
+        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+        const source = ctx.createMediaStreamSource(currentCall.remoteStream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.minDecibels = -85;
+        analyser.maxDecibels = -15;
+        analyser.smoothingTimeConstant = 0.65;
+
+        source.connect(analyser);
+        // Note: for fallback we don't connect to dest here because the <audio> element is already doing playback
+        currentCall.remoteAnalyser = analyser;
+        console.log('[Audio] Remote level meter (fallback stream source) started');
+      } catch (e) {
+        console.warn('Fallback remote analyser also failed', e);
+      }
+    }
+
+    function startLevelMeters() {
+      stopLevelMeters();
+
+      const localBar = document.getElementById('local-level-bar');
+      const localText = document.getElementById('local-level-text');
+      const remoteBar = document.getElementById('remote-level-bar');
+      const remoteText = document.getElementById('remote-level-text');
+
+      currentCall.levelInterval = setInterval(() => {
+        // Local mic level
+        if (currentCall.localAnalyser && localBar && localText) {
+          const buffer = new Uint8Array(currentCall.localAnalyser.frequencyBinCount);
+          currentCall.localAnalyser.getByteFrequencyData(buffer);
+          let sum = 0;
+          for (let i = 0; i < buffer.length; i++) sum += buffer[i];
+          const avg = sum / buffer.length;
+          const pct = Math.min(100, Math.max(0, Math.round((avg / 128) * 100)));
+          localBar.style.width = pct + '%';
+          localText.textContent = pct;
+        }
+
+        // Remote audio level
+        if (currentCall.remoteAnalyser && remoteBar && remoteText) {
+          const buffer = new Uint8Array(currentCall.remoteAnalyser.frequencyBinCount);
+          currentCall.remoteAnalyser.getByteFrequencyData(buffer);
+          let sum = 0;
+          for (let i = 0; i < buffer.length; i++) sum += buffer[i];
+          const avg = sum / buffer.length;
+          const pct = Math.min(100, Math.max(0, Math.round((avg / 128) * 100)));
+          remoteBar.style.width = pct + '%';
+          remoteText.textContent = pct;
+        }
+      }, 90);
+    }
+
+    function stopLevelMeters() {
+      if (currentCall.levelInterval) {
+        clearInterval(currentCall.levelInterval);
+        currentCall.levelInterval = null;
+      }
+      // Reset bars
+      const lb = document.getElementById('local-level-bar');
+      const rb = document.getElementById('remote-level-bar');
+      const lt = document.getElementById('local-level-text');
+      const rt = document.getElementById('remote-level-text');
+      if (lb) lb.style.width = '0%';
+      if (rb) rb.style.width = '0%';
+      if (lt) lt.textContent = '0';
+      if (rt) rt.textContent = '0';
+    }
+
+    function startCallTimer() {
+      if (currentCall.timerInterval) clearInterval(currentCall.timerInterval);
+      
+      currentCall.startTime = Date.now();
+      const timerEl = document.getElementById('call-timer');
+      timerEl.textContent = '00:00';
+      timerEl.classList.remove('text-amber-400');
+
+      currentCall.timerInterval = setInterval(() => {
+        if (!currentCall.startTime) return;
+        const elapsed = Math.floor((Date.now() - currentCall.startTime) / 1000);
+        const min = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        const sec = String(elapsed % 60).padStart(2, '0');
+        timerEl.textContent = `${min}:${sec}`;
+      }, 1000);
+    }
+
+    function toggleMute() {
+      if (!currentCall.localStream) return;
+
+      const audioTrack = currentCall.localStream.getAudioTracks()[0];
+      if (!audioTrack) return;
+
+      currentCall.isMuted = !currentCall.isMuted;
+      audioTrack.enabled = !currentCall.isMuted;
+
+      const btn = document.getElementById('mute-btn');
+      const icon = document.getElementById('mute-icon');
+      const text = document.getElementById('mute-text');
+
+      if (currentCall.isMuted) {
+        icon.classList.remove('fa-microphone');
+        icon.classList.add('fa-microphone-slash', 'mic-muted');
+        text.textContent = 'Unmute';
+        btn.classList.add('!bg-red-900/40', '!border-red-800/70');
+      } else {
+        icon.classList.remove('fa-microphone-slash', 'mic-muted');
+        icon.classList.add('fa-microphone');
+        text.textContent = 'Mute';
+        btn.classList.remove('!bg-red-900/40', '!border-red-800/70');
+      }
+    }
+
+    function endCall() {
+      if (currentCall.peerId && socket) {
+        socket.emit('hangup', { targetId: currentCall.peerId });
+      }
+      cleanupCall();
+    }
+
+    function cleanupCall() {
+      // Stop timer
+      if (currentCall.timerInterval) {
+        clearInterval(currentCall.timerInterval);
+        currentCall.timerInterval = null;
+      }
+
+      stopLevelMeters();
+
+      // Stop local tracks
+      if (currentCall.localStream) {
+        currentCall.localStream.getTracks().forEach(track => track.stop());
+      }
+
+      // Close audio context
+      if (currentCall.audioContext) {
+        try { currentCall.audioContext.close(); } catch (e) {}
+      }
+
+      // Close peer connection
+      if (currentCall.peerConnection) {
+        try { currentCall.peerConnection.close(); } catch (e) {}
+      }
+
+      // Clear remote audio
+      const remoteAudio = document.getElementById('remote-audio');
+      remoteAudio.srcObject = null;
+
+      // Reset state
+      const previousPeer = currentCall.peerId;
+      currentCall = {
+        peerId: null,
+        peerConnection: null,
+        localStream: null,
+        remoteStream: null,
+        isMuted: false,
+        timerInterval: null,
+        startTime: null,
+        localAnalyser: null,
+        remoteAnalyser: null,
+        audioContext: null,
+        levelInterval: null
+      };
+
+      // Reset UI
+      hideActiveCallUI();
+      hideForceAudioButton();
+      document.getElementById('call-btn').disabled = false;
+      document.getElementById('mute-btn').classList.remove('!bg-red-900/40', '!border-red-800/70');
+      document.getElementById('mute-icon').classList.remove('fa-microphone-slash', 'mic-muted');
+      document.getElementById('mute-icon').classList.add('fa-microphone');
+      document.getElementById('mute-text').textContent = 'Mute';
+
+      hideStatus();
+      stopRingTone();
+
+      // Refresh online list
+      if (socket && socket.connected) {
+        socket.emit('get-online-users', (res) => {
+          if (res?.users) renderOnlineUsers(res.users);
+        });
+      }
+
+      // If we had a peer, optionally clear target input
+      if (previousPeer) {
+        document.getElementById('target-id-input').value = '';
+      }
+    }
+
+    // ============== UTILS ==============
+    function showStatus(message, timeoutMs = 1800) {
+      const box = document.getElementById('status-box');
+      box.textContent = message;
+      box.classList.remove('hidden');
+      
+      if (timeoutMs > 0) {
+        setTimeout(() => {
+          if (box.textContent === message) {
+            box.classList.add('hidden');
+          }
+        }, timeoutMs);
+      }
+    }
+
+    function hideStatus() {
+      const box = document.getElementById('status-box');
+      box.classList.add('hidden');
+    }
+
+    // Allow pressing Enter in target input to call
+    function setupKeyboardShortcuts() {
+      const targetInput = document.getElementById('target-id-input');
+      targetInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          startCall();
+        }
+      });
+
+      // Also allow enter in my-id to register
+      const myInput = document.getElementById('my-id-input');
+      myInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          registerCallId();
+        }
+      });
+
+      // Bonus: Press "?" to focus target input
+      document.addEventListener('keydown', (e) => {
+        if (e.key === '/' && document.activeElement.tagName === 'BODY') {
+          e.preventDefault();
+          targetInput.focus();
+        }
+      });
+
+      // Optional: generate random ID suggestion
+      const myInputEl = document.getElementById('my-id-input');
+      if (!myInputEl.value) {
+        myInputEl.placeholder = `Try: user-${Math.floor(1000 + Math.random() * 9000)}`;
+      }
+    }
+
+    // Auto-register helper for quick testing (optional)
+    function setupDemoHelpers() {
+      // If user has not set ID and opens the page, pre-fill a nice suggestion
+      const myInput = document.getElementById('my-id-input');
+      if (!myInput.value) {
+        // Random friendly suggestion
+        const suggestions = ['alex', 'sam', 'jordan', 'taylor', 'casey', 'riley', 'morgan'];
+        const random = suggestions[Math.floor(Math.random() * suggestions.length)] + '-' + Math.floor(10 + Math.random() * 89);
+        myInput.value = random;
+      }
+    }
+
+    function setupVisibilityHandler() {
+      // Stop ringing if tab becomes hidden and user doesn't answer quickly
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden && incomingCallData) {
+          // Keep ringing for now — user can still answer when they switch back
+        }
+      });
+    }
+
+    // ============== INITIALIZATION ==============
+    function initializeApp() {
+      initTailwind();
+      connectSocket();
+      setupKeyboardShortcuts();
+      setupDemoHelpers();
+      setupVisibilityHandler();
+
+      // Try to get initial online users once connected (polling fallback)
+      setTimeout(() => {
+        if (socket && socket.connected && isRegistered) {
+          socket.emit('get-online-users', (res) => {
+            if (res && res.users) renderOnlineUsers(res.users);
+          });
+        }
+      }, 1500);
+
+      // Show a friendly tip on first load
+      setTimeout(() => {
+        const currentId = document.getElementById('current-id-display').textContent;
+        if (!myCallId) {
+          showStatus('Set your Call ID above to get started', 2800);
+        }
+      }, 800);
+
+      // Make sure audio is unlocked (very important for autoplay policies on HTTPS)
+      const unlockAudio = () => {
+        const audio = document.getElementById('remote-audio');
+        if (audio && audio.srcObject) {
+          audio.muted = false;
+          audio.play().catch(() => {});
+        }
+        // Also resume any AudioContext we created
+        if (currentCall.audioContext && currentCall.audioContext.state === 'suspended') {
+          currentCall.audioContext.resume().catch(() => {});
+        }
+      };
+      document.addEventListener('click', unlockAudio, { once: false });
+      document.addEventListener('touchstart', unlockAudio, { once: false });
+
+      // Extra safety: resume audio context on any interaction with call controls
+      ['call-btn', 'mute-btn', 'force-audio-btn'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', () => {
+          if (currentCall.audioContext && currentCall.audioContext.state === 'suspended') {
+            currentCall.audioContext.resume().catch(() => {});
+          }
+        });
+      });
+
+      console.log('%c[MyCall] Fully working two-way WebRTC calling app initialized.', 'color:#64748b');
+    }
+
+    // Boot the app
+    window.onload = initializeApp;
+
+    // Expose a few things for debugging in console if needed
+    window.MyCall = { getState: () => ({ myCallId, currentCall }) };
+  </script>
+</body>
+</html>

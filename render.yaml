@@ -1,0 +1,16 @@
+# Render.com deployment configuration
+# https://render.com/docs/deploy-web-services
+
+services:
+  - type: web
+    name: mycall
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+    autoDeploy: true
+    # Free tier note: service sleeps after 15 minutes of inactivity.
+    # First request after sleep takes ~20-30 seconds to wake up.

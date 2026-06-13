@@ -1,0 +1,20 @@
+{
+  "name": "mycall",
+  "version": "1.0.0",
+  "description": "Fully working two-way web calling app using unique Call IDs and WebRTC",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "webrtc",
+    "calling",
+    "voip",
+    "audio-call",
+    "socket.io"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs"
+}
