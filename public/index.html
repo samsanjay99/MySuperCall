@@ -7,6 +7,23 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Socket.IO client served by the server (guarantees version match with backend) -->
   <script src="/socket.io/socket.io.js"></script>
+
+  <!-- Supabase JS client (browser) — anon key only. Used for Auth + profile reads (RLS).
+       Service role key is NEVER sent to browser (server only, for call_id generation).
+       Phase 0+1 scope: login + permanent call ID binding into existing register flow.
+       Do not add history/favorites/QR/discovery UI until Phase 1 verification passes. -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+  <!-- Server-injected Supabase public config (only URL + anon key).
+       This is replaced dynamically when the Express server serves the page using values from .env.
+       IMPORTANT: Always access via the server (http://localhost:3000 after `npm start`, or your Render URL).
+       Opening the .html file directly will leave the placeholders and cause "Failed to fetch" / ERR_NAME_NOT_RESOLVED. -->
+  <script>
+    window.__MYCALL_SUPABASE_CONFIG__ = {
+      url: '__SUPABASE_URL__',
+      anonKey: '__SUPABASE_ANON_KEY__'
+    };
+  </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&amp;family=Space+Grotesk:wght@500;600&amp;display=swap');
@@ -122,7 +139,7 @@
 </head>
 <body class="bg-slate-950 text-slate-200">
   <div class="min-h-screen flex items-center justify-center p-4 bg-[radial-gradient(#1e2937_0.8px,transparent_1px)] bg-[length:3px_3px]">
-    <div class="w-full max-w-[440px]">
+    <div id="main-container" class="w-full max-w-[440px] transition-all">
       
       <!-- Header -->
       <div class="flex items-center justify-between mb-6 px-1">
@@ -144,11 +161,45 @@
         </div>
       </div>
 
-      <!-- Your Call ID Card -->
-      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-5 mb-4 section-card">
+      <!-- Auth Card (Phase 1) — replaces manual anonymous ID entry with real Supabase login/signup -->
+      <div id="auth-card" class="bg-slate-900 border border-slate-800 rounded-3xl p-5 mb-4 section-card">
+        <div class="text-xs font-semibold tracking-wider text-slate-400 mb-2">ACCOUNT</div>
+
+        <!-- Simple tabs -->
+        <div class="flex gap-2 mb-3">
+          <button onclick="showAuthTab('login')" id="tab-login"
+                  class="flex-1 py-1.5 text-sm rounded-2xl bg-slate-800 border border-slate-700 font-medium">Log in</button>
+          <button onclick="showAuthTab('signup')" id="tab-signup"
+                  class="flex-1 py-1.5 text-sm rounded-2xl border border-slate-700 font-medium">Sign up</button>
+        </div>
+
+        <!-- Login form -->
+        <div id="auth-login">
+          <input id="login-email" type="email" placeholder="Email" class="w-full mb-2 bg-slate-950 border border-slate-800 px-4 py-2.5 rounded-2xl text-sm">
+          <input id="login-password" type="password" placeholder="Password" class="w-full mb-3 bg-slate-950 border border-slate-800 px-4 py-2.5 rounded-2xl text-sm">
+          <button onclick="handleLogin()" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-semibold rounded-2xl text-sm">Log in</button>
+        </div>
+
+        <!-- Signup form -->
+        <div id="auth-signup" class="hidden">
+          <input id="signup-name" type="text" placeholder="Display name (e.g. Sam)" class="w-full mb-2 bg-slate-950 border border-slate-800 px-4 py-2.5 rounded-2xl text-sm">
+          <input id="signup-email" type="email" placeholder="Email" class="w-full mb-2 bg-slate-950 border border-slate-800 px-4 py-2.5 rounded-2xl text-sm">
+          <input id="signup-password" type="password" placeholder="Password (min 6 chars)" class="w-full mb-3 bg-slate-950 border border-slate-800 px-4 py-2.5 rounded-2xl text-sm">
+          <button onclick="handleSignup()" class="w-full py-2.5 bg-white hover:bg-slate-100 active:bg-slate-200 text-slate-900 font-semibold rounded-2xl text-sm">Create account & get permanent Call ID</button>
+          <div class="mt-2 text-[10px] text-slate-500">
+            Your permanent Call ID (S+7/8 random) will be assigned automatically.<br>
+            <span class="text-amber-400">Tip:</span> In your Supabase project (Authentication → Providers → Email), turn OFF "Confirm email" for easier testing.
+          </div>
+        </div>
+
+        <div id="auth-status" class="mt-2 text-xs text-emerald-400 hidden"></div>
+      </div>
+
+      <!-- Your Call ID Card (shown only after login - displays permanent ID) -->
+      <div id="id-card-section" class="hidden bg-slate-900 border border-slate-800 rounded-3xl p-5 mb-4 section-card">
         <div class="flex items-center justify-between mb-3">
           <div>
-            <div class="text-xs font-semibold tracking-wider text-slate-400">YOUR UNIQUE CALL ID</div>
+            <div class="text-xs font-semibold tracking-wider text-slate-400">YOUR PERMANENT CALL ID</div>
             <div id="current-id-display" 
                  class="call-id text-2xl font-semibold text-white mt-0.5 tracking-[2px] min-h-[32px]">
               <span class="text-slate-500">not set</span>
@@ -176,13 +227,13 @@
             SET
           </button>
         </div>
-        <div class="mt-2 text-[10px] text-slate-500 px-1">
-          Pick any unique name. Use the same ID across devices/tabs to receive calls.
+        <div class="mt-2 text-[10px] text-slate-500 px-1" id="id-card-help">
+          Log in / sign up above to get your permanent Call ID (S + 7/8 random characters).
         </div>
       </div>
 
-      <!-- Online Users -->
-      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-5 mb-4 section-card">
+      <!-- Online Users (shown only after login) -->
+      <div id="online-section" class="hidden bg-slate-900 border border-slate-800 rounded-3xl p-5 mb-4 section-card">
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-x-2">
             <i class="fa-solid fa-users text-indigo-400"></i>
@@ -198,8 +249,8 @@
         </div>
       </div>
 
-      <!-- Make a Call -->
-      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-5 mb-4 section-card">
+      <!-- Make a Call (shown only after login) -->
+      <div id="make-call-section" class="hidden bg-slate-900 border border-slate-800 rounded-3xl p-5 mb-4 section-card">
         <div class="text-xs font-semibold tracking-wider text-slate-400 mb-3">MAKE A CALL</div>
         
         <div class="flex gap-2">
@@ -281,7 +332,7 @@
           </button>
         </div>
 
-        <div class="text-[10px] text-center text-slate-500 -mt-1 mb-1">
+        <div class="text-[10px] text-center text-slate-500 -mt-1 mb-1 hidden md:block">
           If THEM bar is stuck or no sound, click the yellow button above.
         </div>
 
@@ -331,8 +382,8 @@
       <div id="status-box" 
            class="hidden text-center text-xs text-slate-400 bg-slate-900 border border-slate-800 px-4 py-2 rounded-2xl mb-3"></div>
 
-      <!-- Quick Info + Testing Advice -->
-      <div class="px-2 text-center">
+      <!-- Quick Info + Testing Advice (shown only after login) -->
+      <div id="quick-info" class="hidden px-2 text-center">
         <div class="text-[10px] text-slate-600">
           <span class="font-medium text-slate-500">Fully peer-to-peer WebRTC audio.</span><br>
           <span class="text-amber-400/80">For best results on same computer:</span> Use headphones on one tab/device.<br>
@@ -355,6 +406,54 @@
     // ============== STATE ==============
     let socket = null;
     let myCallId = null;
+
+    // ===== AUTH (Phase 1 only — Supabase browser client with anon key) =====
+    // The anon key is public by design and safe to embed in the client HTML.
+    // Service role key lives exclusively on the Node server (see server.js).
+    let supabaseClient = null;
+
+    function initSupabaseClient() {
+      // Prefer server-injected config (reliable when accessed via Express server)
+      let url = 'https://YOUR-PROJECT.supabase.co';
+      let anonKey = 'YOUR_ANON_KEY_HERE';
+
+      if (window.__MYCALL_SUPABASE_CONFIG__) {
+        const cfg = window.__MYCALL_SUPABASE_CONFIG__;
+        if (cfg.url && !cfg.url.includes('__SUPABASE')) url = cfg.url;
+        if (cfg.anonKey && !cfg.anonKey.includes('__SUPABASE')) anonKey = cfg.anonKey;
+      }
+
+      if (typeof window.supabase === 'undefined' || !url || !url.startsWith('http') || url.includes('YOUR-PROJECT') || url.includes('__SUPABASE')) {
+        console.error('[Supabase] Invalid or placeholder configuration. url=', url);
+        const authCard = document.getElementById('auth-card');
+        if (authCard) {
+          authCard.innerHTML = `
+            <div class="text-center text-red-400 p-4">
+              <div class="font-semibold mb-2 text-base">Supabase is not configured correctly</div>
+              <div class="text-xs text-slate-400 leading-relaxed">
+                1. Make sure you have a valid <strong>.env</strong> file with SUPABASE_URL and SUPABASE_ANON_KEY.<br>
+                2. Restart the server (<code>npm start</code>).<br>
+                3. <strong>Open the page in your browser via http://localhost:3000</strong> (or your deployed Render URL).<br><br>
+                <strong>Do not</strong> open the public/index.html file directly from your file system.
+              </div>
+            </div>`;
+        }
+        return null;
+      }
+
+      try {
+        supabaseClient = window.supabase.createClient(url, anonKey);
+        console.log('[Supabase] Browser client initialized (anon key)');
+        return supabaseClient;
+      } catch (e) {
+        console.error('[Supabase] init failed', e);
+        return null;
+      }
+    }
+
+    let currentUser = null;   // { id, call_id, display_name, ... } from onboard/profile
+    let isAuthenticated = false;
+
     let currentCall = {
       peerId: null,
       peerConnection: null,
@@ -374,18 +473,39 @@
 
     // ============== SOCKET CONNECTION ==============
     function connectSocket() {
+      if (typeof io !== 'function') {
+        console.error('[MyCall] Socket.IO client not loaded (typeof io !== "function"). The /socket.io/socket.io.js route may have failed or the script tag is missing.');
+        const el = document.getElementById('connection-status');
+        if (el) {
+          el.innerHTML = `<div class="w-2 h-2 rounded-full bg-red-400"></div><span class="text-red-400 font-medium">Library load failed</span>`;
+        }
+        showStatus('Real-time library failed to load. This can happen on some networks. Try a different browser/network or refresh.', 0);
+        return;
+      }
+
       // Use same-origin connection.
       // Explicit options help with proxies, corporate networks, and Render cold starts.
-      socket = io({
-        transports: ['websocket', 'polling'],  // websocket first, fallback to polling
-        timeout: 20000,
-        reconnection: true,
-        reconnectionAttempts: Infinity,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 8000
-      });
+      try {
+        socket = io({
+          transports: ['websocket', 'polling'],  // websocket first, fallback to polling
+          timeout: 20000,
+          reconnection: true,
+          reconnectionAttempts: Infinity,
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 8000
+        });
+      } catch (err) {
+        console.error('[MyCall] Failed to call io():', err);
+        const el = document.getElementById('connection-status');
+        if (el) {
+          el.innerHTML = `<div class="w-2 h-2 rounded-full bg-red-400"></div><span class="text-red-400 font-medium">Connection init failed</span>`;
+        }
+        showStatus('Could not start connection to server.', 0);
+        return;
+      }
 
       socket.on('connect', () => {
+        socketReady = true;
         updateConnectionStatus(true);
         showStatus('Connected to signaling server', 1400);
       });
@@ -401,9 +521,9 @@
 
       socket.on('connect_error', (err) => {
         console.error('[Socket] Connection error:', err.message || err);
+        socketReady = false;
         updateConnectionStatus(false);
         // Friendly message for cold start / slow networks (common on Render free)
-        const msg = (err && err.message) ? err.message : 'Cannot reach server';
         showStatus('Connecting to server... (may take 20-30s on first load)', 0);
       });
 
@@ -415,6 +535,7 @@
       });
 
       socket.io.on('reconnect', () => {
+        socketReady = true;
         updateConnectionStatus(true);
         showStatus('Reconnected to server', 1400);
       });
@@ -548,15 +669,20 @@
       const setBtn = document.getElementById('set-id-btn');
       
       if (connected) {
+        socketReady = true;
         el.innerHTML = `<div class="w-2 h-2 rounded-full bg-emerald-400 status-dot"></div><span class="text-emerald-400 font-medium">Connected</span>`;
         if (setBtn) setBtn.disabled = false;
       } else {
+        socketReady = false;
         el.innerHTML = `<div class="w-2 h-2 rounded-full bg-red-400"></div><span class="text-red-400 font-medium">Offline</span>`;
         if (setBtn) setBtn.disabled = true;
       }
     }
 
     // ============== REGISTRATION ==============
+    // Track readiness separately from the socket object for reliability
+    let socketReady = false;
+
     async function registerCallId() {
       const input = document.getElementById('my-id-input');
       const value = input.value.trim();
@@ -572,25 +698,31 @@
         return;
       }
 
-      // Robust wait for connection (critical for Render cold starts + remote users)
-      if (!socket || !socket.connected) {
-        showStatus('Waiting for server connection...', 0);
+      // Always ensure we are truly ready before emitting 'register'.
+      // This replaces the old brittle "!socket || !socket.connected" check that produced
+      // the "Not connected to server. Refresh the page" message.
+      if (!socketReady || !socket || !socket.connected) {
+        showStatus('Connecting to server — please wait a moment...', 0);
 
         const waitForConnect = new Promise((resolve) => {
-          if (socket && socket.connected) {
+          if (socketReady && socket && socket.connected) {
             resolve(true);
             return;
           }
+
+          const timeoutMs = 18000; // Be very patient for Render cold starts + slow networks
           const timeout = setTimeout(() => {
-            socket && socket.off('connect', onConnect);
+            if (socket) socket.off('connect', onConnect);
             resolve(false);
-          }, 15000); // Generous timeout for Render free tier wake-up (20-40s possible)
+          }, timeoutMs);
 
           const onConnect = () => {
             clearTimeout(timeout);
             if (socket) socket.off('connect', onConnect);
+            socketReady = true;
             resolve(true);
           };
+
           if (socket) {
             socket.once('connect', onConnect);
           } else {
@@ -602,12 +734,19 @@
         const connected = await waitForConnect;
         if (!connected || !socket || !socket.connected) {
           hideStatus();
-          alert('Still not connected to server.\n\nOn Render free tier the server sleeps after ~15 min of inactivity and can take 20-40 seconds to wake on the first visit.\n\nPlease wait 20-30 seconds after the page loads, then try setting your Call ID again. If it persists, refresh the page once.');
+          alert('Could not connect to the signaling server yet.\n\n' +
+                'This is common on Render\'s free tier (the server sleeps after ~15 minutes of inactivity and can take 20-40s to wake).\n\n' +
+                'What to try:\n' +
+                '• Wait 20–40 seconds after the page first loads, then click SET again.\n' +
+                '• Make sure the top status shows "Connected" (green).\n' +
+                '• If it stays on "Connecting..." or "Offline", refresh once and wait again.\n' +
+                '• Some networks block WebSockets — try mobile data, another browser, or incognito.');
           return;
         }
         hideStatus();
       }
 
+      // At this point we should be connected
       socket.emit('register', value, (response) => {
         if (response && response.success) {
           myCallId = response.callId;
@@ -631,6 +770,444 @@
       });
     }
 
+    // ===== AUTH HELPERS (Phase 1) — Supabase + onboard + bind to existing register flow =====
+    // All downstream code (myCallId, isRegistered, startCall guards, fromId in signaling,
+    // renderOnlineUsers, copyCallId, WebRTC, etc.) stays completely unchanged.
+    function showAuthTab(which) {
+      const loginDiv = document.getElementById('auth-login');
+      const signupDiv = document.getElementById('auth-signup');
+      const tabLogin = document.getElementById('tab-login');
+      const tabSignup = document.getElementById('tab-signup');
+
+      if (which === 'login') {
+        loginDiv.classList.remove('hidden');
+        signupDiv.classList.add('hidden');
+        tabLogin.classList.add('bg-slate-800', 'border-slate-700');
+        tabSignup.classList.remove('bg-slate-800', 'border-slate-700');
+      } else {
+        loginDiv.classList.add('hidden');
+        signupDiv.classList.remove('hidden');
+        tabSignup.classList.add('bg-slate-800', 'border-slate-700');
+        tabLogin.classList.remove('bg-slate-800', 'border-slate-700');
+      }
+    }
+
+    async function handleSignup() {
+      const nameEl = document.getElementById('signup-name');
+      const emailEl = document.getElementById('signup-email');
+      const pwEl = document.getElementById('signup-password');
+      const statusEl = document.getElementById('auth-status');
+
+      const displayName = (nameEl.value || '').trim();
+      const email = (emailEl.value || '').trim();
+      const password = pwEl.value || '';
+
+      if (!displayName || !email || password.length < 6) {
+        alert('Please enter display name, email, and a password (6+ characters).');
+        return;
+      }
+
+      if (!supabaseClient) {
+        const msg = 'Supabase client not initialized. Please access the page via the running server (http://localhost:3000 or your deployed URL) after restarting it with a valid .env. Do not open the .html file directly.';
+        alert(msg);
+        console.error(msg);
+        return;
+      }
+
+      statusEl.textContent = 'Creating account...';
+      statusEl.classList.remove('hidden');
+
+      try {
+        const { data, error } = await supabaseClient.auth.signUp({ email, password });
+        if (error) throw error;
+
+        const accessToken = data.session?.access_token;
+
+        if (!accessToken) {
+          // This is normal when "Confirm email" is enabled in Supabase (default).
+          // The user account was created, but they must click the confirmation link in their email first.
+          statusEl.textContent = `Account created! Check your email (${email}) for a confirmation link, then come back and log in.`;
+          // Switch to login tab for convenience and prefill email
+          showAuthTab('login');
+          const loginEmail = document.getElementById('login-email');
+          if (loginEmail) loginEmail.value = email;
+          return;
+        }
+
+        // We have an immediate session (email confirmation is turned off in Supabase project settings)
+        // Now call our server to create profile + permanent call_id
+        const res = await fetch('/api/auth/onboard', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_token: accessToken, display_name: displayName })
+        });
+
+        const json = await res.json();
+        if (!res.ok || !json.profile?.call_id) {
+          throw new Error(json.error || 'Failed to create profile with permanent Call ID');
+        }
+
+        currentUser = json.profile;
+        isAuthenticated = true;
+
+        // === Bind the permanent call_id into the EXISTING registration flow ===
+        const permanentCallId = json.profile.call_id;
+        await finishRegistrationWithCallId(permanentCallId);
+
+        statusEl.textContent = `Welcome! Your permanent Call ID is ${permanentCallId}`;
+        hideAnonymousIdEntry();
+
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = 'Signup failed: ' + (err.message || err);
+        alert('Signup failed: ' + (err.message || err));
+      }
+    }
+
+    async function handleLogin() {
+      const emailEl = document.getElementById('login-email');
+      const pwEl = document.getElementById('login-password');
+      const statusEl = document.getElementById('auth-status');
+
+      const email = (emailEl.value || '').trim();
+      const password = pwEl.value || '';
+
+      if (!email || !password) {
+        alert('Please enter email and password.');
+        return;
+      }
+
+      if (!supabaseClient) {
+        const msg = 'Supabase client not initialized. Please access the page via the running server (http://localhost:3000 or your deployed URL) after restarting it with a valid .env. Do not open the .html file directly.';
+        alert(msg);
+        console.error(msg);
+        return;
+      }
+
+      statusEl.textContent = 'Signing in...';
+      statusEl.classList.remove('hidden');
+
+      try {
+        const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+
+        const accessToken = data.session?.access_token;
+        const res = await fetch('/api/auth/onboard', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_token: accessToken })
+        });
+
+        const json = await res.json();
+        if (!res.ok || !json.profile?.call_id) {
+          throw new Error(json.error || 'Failed to load profile');
+        }
+
+        currentUser = json.profile;
+        isAuthenticated = true;
+
+        const permanentCallId = json.profile.call_id;
+        await finishRegistrationWithCallId(permanentCallId);
+
+        statusEl.textContent = `Logged in as ${json.profile.display_name || ''} (${permanentCallId})`;
+        hideAnonymousIdEntry();
+
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = 'Login failed: ' + (err.message || err);
+        alert('Login failed: ' + (err.message || err));
+      }
+    }
+
+    // Reusable helper that feeds a permanent call_id into the exact existing register machinery.
+    // This keeps every consumer of myCallId / isRegistered 100% unchanged.
+    async function finishRegistrationWithCallId(permanentCallId) {
+      if (!permanentCallId) return;
+
+      // If we are not socket-ready yet, the existing patient wait inside registerCallId will handle it,
+      // but we call the emit path directly for clarity.
+      // We still go through the same socket 'register' + ack that the old flow used.
+      return new Promise((resolve) => {
+        // Reuse the robustness: wait for socket if needed (copied patience from previous work)
+        const doRegister = () => {
+          socket.emit('register', permanentCallId, (response) => {
+            if (response && response.success) {
+              myCallId = response.callId;
+              isRegistered = true;
+
+              // Update the display (this is the same DOM update the old register success did)
+              const display = document.getElementById('current-id-display');
+              if (display) {
+                display.innerHTML = `<span class="text-emerald-400">${myCallId}</span>`;
+              }
+
+              showStatus(`You are now reachable as "${myCallId}" (permanent)`, 2200);
+
+              // Refresh online list exactly as before
+              socket.emit('get-online-users', (res) => {
+                if (res && res.users) renderOnlineUsers(res.users);
+              });
+
+              // Hide the old anonymous input/SET UI
+              hideAnonymousIdEntry();
+
+              // After login: hide the auth forms card and show the clean main app UI
+              const authCard = document.getElementById('auth-card');
+              if (authCard) authCard.style.display = 'none';
+
+              // Show the main app sections (ID display, online, make call, info)
+              const sections = ['id-card-section', 'online-section', 'make-call-section', 'quick-info'];
+              sections.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.remove('hidden');
+              });
+
+              // Update the help text in the ID card now that we have permanent ID
+              const help = document.getElementById('id-card-help');
+              if (help) help.textContent = 'This is your permanent public Call ID. Share it to receive calls.';
+
+              // Initialize the new modern post-login UI (new look + features)
+              initializeModernUI();
+
+              resolve(true);
+            } else {
+              alert(response?.error || 'Failed to register permanent Call ID with server');
+              resolve(false);
+            }
+          });
+        };
+
+        if (socket && socket.connected) {
+          doRegister();
+        } else {
+          // Fall back to the patient wait the app already has
+          setTimeout(() => {
+            if (socket && socket.connected) doRegister();
+            else resolve(false);
+          }, 1200);
+        }
+      });
+    }
+
+    function hideAnonymousIdEntry() {
+      // Phase 1: once we have a permanent authenticated ID, hide the manual input + SET button
+      const input = document.getElementById('my-id-input');
+      const setBtn = document.getElementById('set-id-btn');
+      if (input) input.style.display = 'none';
+      if (setBtn) setBtn.style.display = 'none';
+    }
+
+    function logout() {
+      if (supabaseClient) {
+        supabaseClient.auth.signOut().then(() => {
+          // Reset state
+          myCallId = null;
+          isAuthenticated = false;
+          currentUser = null;
+          if (socket) socket.disconnect();
+
+          // Show auth card again
+          const authCard = document.getElementById('auth-card');
+          if (authCard) {
+            authCard.style.display = '';
+            // Re-render the original auth forms (simple reload for now)
+            location.reload();
+          }
+
+          // Collapse main container back to phone size
+          const container = document.getElementById('main-container');
+          if (container) {
+            container.classList.add('max-w-[440px]');
+            container.classList.remove('max-w-7xl');
+          }
+
+          // Hide modern sections
+          ['id-card-section', 'online-section', 'make-call-section'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.add('hidden');
+          });
+        });
+      }
+    }
+
+    // Modern authenticated UI initializer (post-login "new look" per plan)
+    function initializeModernUI() {
+      const container = document.getElementById('main-container');
+      if (container) {
+        container.classList.remove('max-w-[440px]');
+        container.classList.add('max-w-7xl', 'mx-auto');
+      }
+
+      // Hide the old classic help text inside ID card if present
+      const help = document.getElementById('id-card-help');
+      if (help) help.style.display = 'none';
+
+      // Add / update a modern top app bar with search + profile menu
+      let topBar = document.getElementById('modern-top-bar');
+      if (!topBar) {
+        topBar = document.createElement('div');
+        topBar.id = 'modern-top-bar';
+        topBar.className = 'flex items-center justify-between bg-slate-900 border border-slate-800 rounded-3xl px-4 py-3 mb-6';
+        topBar.innerHTML = `
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-2xl bg-indigo-600 flex items-center justify-center">
+              <i class="fa-solid fa-phone text-white"></i>
+            </div>
+            <div>
+              <span class="font-display text-xl font-semibold">MyCall</span>
+              <span class="text-[10px] text-slate-500 ml-1">PRO</span>
+            </div>
+          </div>
+
+          <div class="flex-1 max-w-md mx-4">
+            <div class="relative">
+              <input id="global-search" type="text" placeholder="Search by name or Call ID (e.g. SABC2345)" 
+                     class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 text-sm px-4 py-2 rounded-2xl pl-10 outline-none">
+              <i class="fa-solid fa-search absolute left-3.5 top-2.5 text-slate-500 text-sm"></i>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <div onclick="copyMyCallId()" class="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-2xl text-xs cursor-pointer border border-slate-700">
+              <i class="fa-solid fa-id-card"></i>
+              <span id="header-callid" class="font-mono tracking-widest text-emerald-400">${myCallId || ''}</span>
+              <i class="fa-solid fa-copy text-slate-400"></i>
+            </div>
+
+            <div class="relative group">
+              <button class="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-2xl text-sm border border-slate-700">
+                <div class="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-400 to-emerald-400 flex items-center justify-center text-[10px] font-bold text-white">
+                  ${(currentUser?.display_name || 'U').charAt(0).toUpperCase()}
+                </div>
+                <span class="text-xs hidden md:block">${currentUser?.display_name || 'You'}</span>
+                <i class="fa-solid fa-chevron-down text-xs"></i>
+              </button>
+              <div class="absolute right-0 mt-1 w-48 bg-slate-900 border border-slate-700 rounded-2xl shadow-xl py-1 hidden group-hover:block z-50">
+                <div onclick="copyMyCallId()" class="px-4 py-2 text-xs hover:bg-slate-800 cursor-pointer flex items-center gap-2">
+                  <i class="fa-solid fa-copy w-4"></i> Copy my Call ID
+                </div>
+                <div class="border-t border-slate-700 my-1"></div>
+                <div onclick="logout()" class="px-4 py-2 text-xs hover:bg-red-900/30 text-red-400 cursor-pointer flex items-center gap-2">
+                  <i class="fa-solid fa-sign-out-alt w-4"></i> Log out
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+        // Insert after the main header
+        const header = document.querySelector('header') || document.querySelector('.flex.items-center.justify-between.mb-6');
+        if (header && header.parentNode) {
+          header.parentNode.insertBefore(topBar, header.nextSibling);
+        }
+      }
+
+      // Make the ID card section a clean permanent ID banner
+      const idSection = document.getElementById('id-card-section');
+      if (idSection) {
+        idSection.innerHTML = `
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-xs text-slate-400">YOUR PERMANENT PUBLIC CALL ID</div>
+              <div class="font-mono text-3xl font-semibold text-emerald-400 tracking-[3px] mt-1">${myCallId || ''}</div>
+            </div>
+            <button onclick="copyMyCallId()" class="px-5 py-2 text-sm flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-white font-medium">
+              <i class="fa-solid fa-copy"></i>
+              <span>COPY</span>
+            </button>
+          </div>
+          <div class="text-[10px] text-slate-500 mt-2">Share this ID with friends so they can call you directly.</div>
+        `;
+        idSection.classList.remove('hidden');
+      }
+
+      // Enhance the online section title
+      const onlineSection = document.getElementById('online-section');
+      if (onlineSection) {
+        const title = onlineSection.querySelector('.font-semibold');
+        if (title) title.textContent = 'DISCOVER ONLINE';
+        onlineSection.classList.remove('hidden');
+      }
+
+      // Add search listener for filtering the online list + basic Supabase search for all users
+      const searchInput = document.getElementById('global-search');
+      if (searchInput) {
+        let searchTimeout;
+        searchInput.addEventListener('input', () => {
+          clearTimeout(searchTimeout);
+          const q = searchInput.value.toLowerCase().trim();
+
+          // Live filter current online list
+          const cards = document.querySelectorAll('#online-users-list > div');
+          cards.forEach(c => {
+            const text = c.textContent.toLowerCase();
+            c.style.display = !q || text.includes(q) ? '' : 'none';
+          });
+
+          // If query is longer, also search all profiles in Supabase (new feature)
+          if (q.length > 2 && supabaseClient) {
+            searchTimeout = setTimeout(async () => {
+              try {
+                const { data: profiles } = await supabaseClient
+                  .from('profiles')
+                  .select('call_id, display_name')
+                  .or(`call_id.ilike.%${q}%,display_name.ilike.%${q}%`)
+                  .limit(8);
+
+                if (profiles && profiles.length) {
+                  const onlineContainer = document.getElementById('online-users-list');
+                  // Append non-online matches as "all users" suggestions (simple for now)
+                  profiles.forEach(p => {
+                    if (p.call_id === myCallId) return;
+                    // Avoid duplicates with current online
+                    const exists = Array.from(onlineContainer.children).some(el => el.textContent.includes(p.call_id));
+                    if (!exists) {
+                      const initials = (p.call_id || '??').substring(0,2).toUpperCase();
+                      const card = document.createElement('div');
+                      card.className = `flex items-center gap-3 px-3 py-2 bg-slate-800/60 border border-slate-700 rounded-2xl text-xs opacity-80`;
+                      card.innerHTML = `
+                        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-slate-400 to-slate-600 flex items-center justify-center text-white text-xs font-bold">${initials}</div>
+                        <div class="flex-1">
+                          <div class="font-medium">${p.display_name || p.call_id}</div>
+                          <div class="text-[10px] text-slate-400">${p.call_id}</div>
+                        </div>
+                        <button class="text-xs px-2 py-0.5 bg-slate-700 rounded">CALL</button>
+                      `;
+                      card.onclick = () => {
+                        document.getElementById('target-id-input').value = p.call_id;
+                      };
+                      onlineContainer.appendChild(card);
+                      // Auto remove after 8s
+                      setTimeout(() => card.remove(), 8000);
+                    }
+                  });
+                }
+              } catch(e) { /* silent for search */ }
+            }, 350);
+          }
+        });
+      }
+
+      // Update header call ID display
+      const headerId = document.getElementById('header-callid');
+      if (headerId && myCallId) headerId.textContent = myCallId;
+
+      console.log('[UI] Modern authenticated layout initialized');
+    }
+
+    function copyMyCallId() {
+      if (!myCallId) return;
+      navigator.clipboard.writeText(myCallId).then(() => {
+        const orig = document.getElementById('header-callid');
+        if (orig) {
+          const old = orig.textContent;
+          orig.textContent = 'COPIED!';
+          setTimeout(() => { if (orig) orig.textContent = old; }, 1200);
+        } else {
+          showStatus(`Copied ${myCallId}`, 1200);
+        }
+      });
+    }
+
     function copyCallId() {
       if (!myCallId) {
         alert('Set your Call ID first!');
@@ -642,7 +1219,7 @@
       });
     }
 
-    // ============== ONLINE USERS ==============
+    // ============== ONLINE USERS (modern cards per plan) ==============
     function renderOnlineUsers(users) {
       const container = document.getElementById('online-users-list');
       const countEl = document.getElementById('online-count');
@@ -654,23 +1231,40 @@
       countEl.textContent = `${filtered.length} online`;
 
       if (filtered.length === 0) {
-        container.innerHTML = `<div class="text-xs text-slate-500 px-1">No one else is online yet. Open another tab or device!</div>`;
+        container.innerHTML = `<div class="text-xs text-slate-500 px-1 col-span-full">No one else is online yet. Share your Call ID with friends!</div>`;
         return;
       }
 
       container.innerHTML = '';
+      container.className = `grid grid-cols-1 sm:grid-cols-2 gap-2 min-h-[42px]`;  // modern grid
+
       filtered.forEach(userId => {
-        const pill = document.createElement('div');
-        pill.className = `user-pill px-3 py-1 bg-slate-800 border border-slate-700 rounded-2xl text-xs flex items-center gap-x-1.5 cursor-pointer`;
-        pill.innerHTML = `
-          <i class="fa-solid fa-circle text-emerald-400 text-[9px]"></i>
-          <span class="font-medium">${userId}</span>
+        const initials = userId.substring(0,2).toUpperCase();
+        const card = document.createElement('div');
+        card.className = `flex items-center gap-3 px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-2xl cursor-pointer transition`;
+        card.innerHTML = `
+          <div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-indigo-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+            ${initials}
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="font-medium text-sm truncate">${userId}</div>
+            <div class="text-emerald-400 text-[10px] flex items-center gap-1">
+              <i class="fa-solid fa-circle text-[8px]"></i> ONLINE
+            </div>
+          </div>
+          <button class="text-emerald-400 hover:text-white text-xs px-3 py-1 bg-emerald-900/30 hover:bg-emerald-600 rounded-xl font-medium flex items-center gap-1">
+            <i class="fa-solid fa-phone text-[10px]"></i> CALL
+          </button>
         `;
-        pill.onclick = () => {
-          document.getElementById('target-id-input').value = userId;
-          // Auto start call on double click? No, single is fine — user presses CALL
+        card.onclick = (e) => {
+          if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+            document.getElementById('target-id-input').value = userId;
+            startCall();
+          } else {
+            document.getElementById('target-id-input').value = userId;
+          }
         };
-        container.appendChild(pill);
+        container.appendChild(card);
       });
     }
 
@@ -1398,16 +1992,9 @@
       }
     }
 
-    // Auto-register helper for quick testing (optional)
+    // Demo helper disabled for auth flow (Phase 1+). The old manual prefill is no longer used.
     function setupDemoHelpers() {
-      // If user has not set ID and opens the page, pre-fill a nice suggestion
-      const myInput = document.getElementById('my-id-input');
-      if (!myInput.value) {
-        // Random friendly suggestion
-        const suggestions = ['alex', 'sam', 'jordan', 'taylor', 'casey', 'riley', 'morgan'];
-        const random = suggestions[Math.floor(Math.random() * suggestions.length)] + '-' + Math.floor(10 + Math.random() * 89);
-        myInput.value = random;
-      }
+      // no-op - permanent Call ID comes from Supabase profile after login
     }
 
     function setupVisibilityHandler() {
@@ -1422,9 +2009,61 @@
     // ============== INITIALIZATION ==============
     function initializeApp() {
       initTailwind();
-      connectSocket();
-      setupKeyboardShortcuts();
+
+      // Phase 1: initialize Supabase browser client (anon key) as early as possible
+      initSupabaseClient();
+
+      // Restore previous session (if any) and re-bind the permanent call_id
+      if (supabaseClient) {
+        supabaseClient.auth.getSession().then(({ data }) => {
+          if (data?.session) {
+            // Re-onboard / fetch profile to get the permanent call_id and bind it
+            const token = data.session.access_token;
+            fetch('/api/auth/onboard', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ access_token: token })
+            }).then(r => r.json()).then(json => {
+              if (json.profile?.call_id) {
+                currentUser = json.profile;
+                isAuthenticated = true;
+                finishRegistrationWithCallId(json.profile.call_id);
+                // Hide auth forms once restored
+                const authCard = document.getElementById('auth-card');
+                if (authCard) authCard.style.display = 'none';
+              }
+            }).catch(() => {});
+          }
+        });
+
+        // Optional: listen for future sign-out etc.
+        supabaseClient.auth.onAuthStateChange((event) => {
+          if (event === 'SIGNED_OUT') {
+            myCallId = null;
+            isRegistered = false;
+            isAuthenticated = false;
+            currentUser = null;
+            const display = document.getElementById('current-id-display');
+            if (display) display.innerHTML = '<span class="text-slate-500">not logged in</span>';
+            // show input again if needed (for dev)
+            const input = document.getElementById('my-id-input');
+            const setBtn = document.getElementById('set-id-btn');
+            if (input) input.style.display = '';
+            if (setBtn) setBtn.style.display = '';
+          }
+        });
+      }
+
+      // Run UI-only setup (prefill + placeholder + keyboard) FIRST.
+      // This guarantees the random suggestion appears in the textbox even if
+      // the Socket.IO client script fails to load or connectSocket() throws.
       setupDemoHelpers();
+      setupKeyboardShortcuts();
+
+      // Socket connection can fail on restrictive networks or if client lib doesn't load.
+      // Guard it so it doesn't break the rest of the page.
+      connectSocket();
+
       setupVisibilityHandler();
 
       // Try to get initial online users once connected (polling fallback)
