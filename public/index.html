@@ -137,8 +137,8 @@
     }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-200">
-  <div class="min-h-screen flex items-center justify-center p-4 bg-[radial-gradient(#1e2937_0.8px,transparent_1px)] bg-[length:3px_3px]">
+<body class="bg-slate-950 text-slate-200 overflow-x-hidden">
+  <div id="root-app" class="min-h-screen flex items-center justify-center p-2 sm:p-4 bg-[radial-gradient(#1e2937_0.8px,transparent_1px)] bg-[length:3px_3px]">
     <div id="main-container" class="w-full max-w-[440px] transition-all">
       
       <!-- Header -->
@@ -1033,9 +1033,18 @@
     // Modern authenticated UI initializer (post-login "new look" per plan)
     function initializeModernUI() {
       const container = document.getElementById('main-container');
+      const root = document.getElementById('root-app');
+
+      // Make root full-width and remove centering for modern app layout on mobile + desktop
+      if (root) {
+        root.classList.remove('flex', 'items-center', 'justify-center');
+        root.classList.add('block', 'min-h-dvh'); // better mobile viewport height
+        root.style.padding = ''; // let inner padding handle
+      }
+
       if (container) {
         container.classList.remove('max-w-[440px]');
-        container.classList.add('max-w-7xl', 'mx-auto');
+        container.classList.add('max-w-full', 'md:max-w-5xl', 'lg:max-w-6xl', 'mx-auto', 'px-1.5', 'sm:px-3');
       }
 
       // Hide the old classic help text inside ID card if present
@@ -1047,48 +1056,61 @@
       if (!topBar) {
         topBar = document.createElement('div');
         topBar.id = 'modern-top-bar';
-        topBar.className = 'flex items-center justify-between bg-slate-900 border border-slate-800 rounded-3xl px-4 py-3 mb-6';
+        topBar.className = 'flex flex-col sm:flex-row items-center gap-3 sm:gap-4 bg-slate-900 border border-slate-800 rounded-3xl px-3 py-2 sm:py-3 mb-4 sm:mb-6';
         topBar.innerHTML = `
-          <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-2xl bg-indigo-600 flex items-center justify-center">
-              <i class="fa-solid fa-phone text-white"></i>
+          <div class="flex items-center justify-between w-full sm:w-auto gap-3">
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-2xl bg-indigo-600 flex items-center justify-center">
+                <i class="fa-solid fa-phone text-white text-sm"></i>
+              </div>
+              <div>
+                <span class="font-display text-lg sm:text-xl font-semibold">MyCall</span>
+              </div>
             </div>
-            <div>
-              <span class="font-display text-xl font-semibold">MyCall</span>
-              <span class="text-[10px] text-slate-500 ml-1">PRO</span>
+
+            <!-- Profile menu for mobile (moved to left on small) -->
+            <div class="sm:hidden relative group">
+              <button class="flex items-center gap-1.5 px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-2xl text-xs border border-slate-700">
+                <div class="w-5 h-5 rounded-full bg-gradient-to-br from-indigo-400 to-emerald-400 flex items-center justify-center text-[9px] font-bold text-white">
+                  ${(currentUser?.display_name || 'U').charAt(0).toUpperCase()}
+                </div>
+              </button>
+              <div class="absolute right-0 mt-1 w-40 bg-slate-900 border border-slate-700 rounded-2xl shadow-xl py-1 hidden group-hover:block z-50 text-xs">
+                <div onclick="copyMyCallId()" class="px-3 py-1.5 hover:bg-slate-800 cursor-pointer">Copy Call ID</div>
+                <div onclick="logout()" class="px-3 py-1.5 hover:bg-red-900/30 text-red-400 cursor-pointer">Log out</div>
+              </div>
             </div>
           </div>
 
-          <div class="flex-1 max-w-md mx-4">
+          <div class="w-full sm:flex-1 sm:max-w-md">
             <div class="relative">
-              <input id="global-search" type="text" placeholder="Search by name or Call ID (e.g. SABC2345)" 
-                     class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 text-sm px-4 py-2 rounded-2xl pl-10 outline-none">
-              <i class="fa-solid fa-search absolute left-3.5 top-2.5 text-slate-500 text-sm"></i>
+              <input id="global-search" type="text" placeholder="Search name or Call ID" 
+                     class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 text-sm px-3 py-2 rounded-2xl pl-9 outline-none">
+              <i class="fa-solid fa-search absolute left-3 top-2.5 text-slate-500 text-sm"></i>
             </div>
           </div>
 
-          <div class="flex items-center gap-3">
-            <div onclick="copyMyCallId()" class="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-2xl text-xs cursor-pointer border border-slate-700">
-              <i class="fa-solid fa-id-card"></i>
-              <span id="header-callid" class="font-mono tracking-widest text-emerald-400">${myCallId || ''}</span>
-              <i class="fa-solid fa-copy text-slate-400"></i>
+          <div class="hidden sm:flex items-center gap-2">
+            <div onclick="copyMyCallId()" class="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded-2xl text-xs cursor-pointer border border-slate-700">
+              <span id="header-callid" class="font-mono tracking-widest text-emerald-400 text-xs">${myCallId || ''}</span>
+              <i class="fa-solid fa-copy text-slate-400 text-xs"></i>
             </div>
 
             <div class="relative group">
-              <button class="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-2xl text-sm border border-slate-700">
-                <div class="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-400 to-emerald-400 flex items-center justify-center text-[10px] font-bold text-white">
+              <button class="flex items-center gap-1.5 px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-2xl text-xs border border-slate-700">
+                <div class="w-5 h-5 rounded-full bg-gradient-to-br from-indigo-400 to-emerald-400 flex items-center justify-center text-[9px] font-bold text-white">
                   ${(currentUser?.display_name || 'U').charAt(0).toUpperCase()}
                 </div>
-                <span class="text-xs hidden md:block">${currentUser?.display_name || 'You'}</span>
+                <span class="hidden md:inline text-xs">${currentUser?.display_name || 'You'}</span>
                 <i class="fa-solid fa-chevron-down text-xs"></i>
               </button>
-              <div class="absolute right-0 mt-1 w-48 bg-slate-900 border border-slate-700 rounded-2xl shadow-xl py-1 hidden group-hover:block z-50">
-                <div onclick="copyMyCallId()" class="px-4 py-2 text-xs hover:bg-slate-800 cursor-pointer flex items-center gap-2">
-                  <i class="fa-solid fa-copy w-4"></i> Copy my Call ID
+              <div class="absolute right-0 mt-1 w-44 bg-slate-900 border border-slate-700 rounded-2xl shadow-xl py-1 hidden group-hover:block z-50 text-xs">
+                <div onclick="copyMyCallId()" class="px-3 py-1.5 hover:bg-slate-800 cursor-pointer flex items-center gap-2">
+                  <i class="fa-solid fa-copy w-3"></i> Copy my Call ID
                 </div>
-                <div class="border-t border-slate-700 my-1"></div>
-                <div onclick="logout()" class="px-4 py-2 text-xs hover:bg-red-900/30 text-red-400 cursor-pointer flex items-center gap-2">
-                  <i class="fa-solid fa-sign-out-alt w-4"></i> Log out
+                <div class="border-t border-slate-700 my-0.5"></div>
+                <div onclick="logout()" class="px-3 py-1.5 hover:bg-red-900/30 text-red-400 cursor-pointer flex items-center gap-2">
+                  <i class="fa-solid fa-sign-out-alt w-3"></i> Log out
                 </div>
               </div>
             </div>
@@ -1105,17 +1127,17 @@
       const idSection = document.getElementById('id-card-section');
       if (idSection) {
         idSection.innerHTML = `
-          <div class="flex items-center justify-between">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
-              <div class="text-xs text-slate-400">YOUR PERMANENT PUBLIC CALL ID</div>
-              <div class="font-mono text-3xl font-semibold text-emerald-400 tracking-[3px] mt-1">${myCallId || ''}</div>
+              <div class="text-[10px] text-slate-400">YOUR PERMANENT PUBLIC CALL ID</div>
+              <div class="font-mono text-2xl sm:text-3xl font-semibold text-emerald-400 tracking-[2px] sm:tracking-[3px] mt-0.5">${myCallId || ''}</div>
             </div>
-            <button onclick="copyMyCallId()" class="px-5 py-2 text-sm flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-white font-medium">
+            <button onclick="copyMyCallId()" class="w-full sm:w-auto px-4 py-2 text-sm flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 rounded-2xl text-white font-medium touch-manipulation">
               <i class="fa-solid fa-copy"></i>
               <span>COPY</span>
             </button>
           </div>
-          <div class="text-[10px] text-slate-500 mt-2">Share this ID with friends so they can call you directly.</div>
+          <div class="text-[10px] text-slate-500 mt-1">Share this ID so friends can reach you.</div>
         `;
         idSection.classList.remove('hidden');
       }
@@ -1127,6 +1149,10 @@
         if (title) title.textContent = 'DISCOVER ONLINE';
         onlineSection.classList.remove('hidden');
       }
+
+      // Hide old classic footer advice on modern layout
+      const quick = document.getElementById('quick-info');
+      if (quick) quick.classList.add('hidden');
 
       // Add search listener for filtering the online list + basic Supabase search for all users
       const searchInput = document.getElementById('global-search');
