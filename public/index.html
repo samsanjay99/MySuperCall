@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MyCall • Web Calling</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <!-- Socket.IO client served by the server (guarantees version match with backend) -->
+  <script src="/socket.io/socket.io.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&amp;family=Space+Grotesk:wght@500;600&amp;display=swap');
@@ -137,8 +138,8 @@
         <div class="flex items-center gap-x-2 text-xs">
           <div id="connection-status" 
                class="flex items-center gap-x-1.5 px-3 py-1 rounded-full bg-slate-900 border border-slate-800">
-            <div class="w-2 h-2 rounded-full bg-emerald-400 status-dot"></div>
-            <span class="text-emerald-400 font-medium">Connected</span>
+            <div class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></div>
+            <span class="text-amber-400 font-medium">Connecting...</span>
           </div>
         </div>
       </div>
@@ -169,7 +170,9 @@
                  class="flex-1 bg-slate-950 border border-slate-800 focus:border-indigo-600 text-white placeholder:text-slate-600 px-4 py-3 rounded-2xl text-sm outline-none">
           
           <button onclick="registerCallId()"
-                  class="px-6 bg-white hover:bg-slate-100 active:bg-slate-200 transition-colors text-slate-900 font-semibold rounded-2xl text-sm">
+                  id="set-id-btn"
+                  disabled
+                  class="px-6 bg-white hover:bg-slate-100 active:bg-slate-200 transition-colors text-slate-900 font-semibold rounded-2xl text-sm disabled:opacity-50 disabled:cursor-not-allowed">
             SET
           </button>
         </div>
@@ -371,18 +374,49 @@
 
     // ============== SOCKET CONNECTION ==============
     function connectSocket() {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      // When served by our server, just use relative
-      socket = io();
+      // Use same-origin connection.
+      // Explicit options help with proxies, corporate networks, and Render cold starts.
+      socket = io({
+        transports: ['websocket', 'polling'],  // websocket first, fallback to polling
+        timeout: 20000,
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 8000
+      });
 
       socket.on('connect', () => {
         updateConnectionStatus(true);
         showStatus('Connected to signaling server', 1400);
       });
 
-      socket.on('disconnect', () => {
+      socket.on('disconnect', (reason) => {
         updateConnectionStatus(false);
-        showStatus('Disconnected from server', 2000);
+        console.warn('[Socket] Disconnected:', reason);
+        // Only show noisy message for unexpected disconnects
+        if (reason !== 'io client disconnect') {
+          showStatus('Disconnected from server', 2000);
+        }
+      });
+
+      socket.on('connect_error', (err) => {
+        console.error('[Socket] Connection error:', err.message || err);
+        updateConnectionStatus(false);
+        // Friendly message for cold start / slow networks (common on Render free)
+        const msg = (err && err.message) ? err.message : 'Cannot reach server';
+        showStatus('Connecting to server... (may take 20-30s on first load)', 0);
+      });
+
+      socket.io.on('reconnect_attempt', (attempt) => {
+        const el = document.getElementById('connection-status');
+        if (el) {
+          el.innerHTML = `<div class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></div><span class="text-amber-400 font-medium">Reconnecting...</span>`;
+        }
+      });
+
+      socket.io.on('reconnect', () => {
+        updateConnectionStatus(true);
+        showStatus('Reconnected to server', 1400);
       });
 
       // Registration response is handled via callback
@@ -511,10 +545,14 @@
       const el = document.getElementById('connection-status');
       if (!el) return;
       
+      const setBtn = document.getElementById('set-id-btn');
+      
       if (connected) {
         el.innerHTML = `<div class="w-2 h-2 rounded-full bg-emerald-400 status-dot"></div><span class="text-emerald-400 font-medium">Connected</span>`;
+        if (setBtn) setBtn.disabled = false;
       } else {
         el.innerHTML = `<div class="w-2 h-2 rounded-full bg-red-400"></div><span class="text-red-400 font-medium">Offline</span>`;
+        if (setBtn) setBtn.disabled = true;
       }
     }
 
@@ -528,15 +566,46 @@
         return;
       }
 
-      if (!socket || !socket.connected) {
-        alert('Not connected to server. Refresh the page.');
-        return;
-      }
-
       // If already registered with same ID, just ignore
       if (myCallId === value) {
         showStatus('Already using this Call ID', 1200);
         return;
+      }
+
+      // Robust wait for connection (critical for Render cold starts + remote users)
+      if (!socket || !socket.connected) {
+        showStatus('Waiting for server connection...', 0);
+
+        const waitForConnect = new Promise((resolve) => {
+          if (socket && socket.connected) {
+            resolve(true);
+            return;
+          }
+          const timeout = setTimeout(() => {
+            socket && socket.off('connect', onConnect);
+            resolve(false);
+          }, 15000); // Generous timeout for Render free tier wake-up (20-40s possible)
+
+          const onConnect = () => {
+            clearTimeout(timeout);
+            if (socket) socket.off('connect', onConnect);
+            resolve(true);
+          };
+          if (socket) {
+            socket.once('connect', onConnect);
+          } else {
+            clearTimeout(timeout);
+            resolve(false);
+          }
+        });
+
+        const connected = await waitForConnect;
+        if (!connected || !socket || !socket.connected) {
+          hideStatus();
+          alert('Still not connected to server.\n\nOn Render free tier the server sleeps after ~15 min of inactivity and can take 20-40 seconds to wake on the first visit.\n\nPlease wait 20-30 seconds after the page loads, then try setting your Call ID again. If it persists, refresh the page once.');
+          return;
+        }
+        hideStatus();
       }
 
       socket.emit('register', value, (response) => {

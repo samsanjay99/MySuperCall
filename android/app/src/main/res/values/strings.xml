@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MyCall</string>
+    <string name="call_id_hint">Enter your Call ID (e.g. alice, bob, 4821)</string>
+    <string name="target_id_hint">Enter their Call ID</string>
+</resources>

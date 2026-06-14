@@ -113,3 +113,28 @@ The easiest free way to test between phones/laptops on different networks is to 
 - No external services or paid APIs required
 
 Enjoy making calls! If sound still doesn't work after these fixes, open the browser DevTools Console (F12) on both sides during a call and send me any errors you see.
+
+---
+
+## Android App
+
+A fully native Android version of MyCall is included in the `android/` folder.
+
+**Features**:
+- Identical functionality to the web app (unique Call IDs, online list, incoming calls, full-duplex WebRTC audio, level meters, mute, timer, volume, etc.)
+- **Cross-platform calling works**: Android ↔ Web, Android ↔ Android
+- Uses the **exact same** `server.js` (no backend changes)
+
+**Quick start**:
+1. Open the `android/` folder in Android Studio.
+2. Sync Gradle.
+3. Run on a phone or emulator.
+4. The app now defaults to your deployed server: **https://mycall-wji0.onrender.com**
+   - This is the easiest and recommended option for real cross-device testing (Android ↔ Android or Android ↔ Web).
+   - Tap the top "Server:" bar only if you want to switch to a local server during development.
+
+See [android/README.md](android/README.md) and [android/DEPLOYED_SERVER.md](android/DEPLOYED_SERVER.md) for testing instructions.
+
+**Free tier note**: Your Render server sleeps after inactivity. First connection after sleeping can take 20-40s (normal cold start).
+
+The Android client is written in Kotlin + Jetpack Compose + WebRTC + Socket.IO client and mirrors the web signaling protocol perfectly.

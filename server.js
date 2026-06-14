@@ -5,11 +5,18 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
+
+// Trust proxy (important for Render, Railway, and other platforms that terminate TLS)
+app.set('trust proxy', 1);
+
 const io = new Server(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
-  }
+  },
+  // Connection tuning for real-world networks and proxies
+  pingTimeout: 60000,
+  pingInterval: 25000
 });
 
 const PORT = process.env.PORT || 3000;

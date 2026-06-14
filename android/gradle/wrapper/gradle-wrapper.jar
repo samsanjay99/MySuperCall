@@ -1,0 +1,9 @@
+PLACEHOLDER - Android Studio will replace this automatically when you open the project.
+
+To manually get the real jar:
+1. Open the android folder in Android Studio
+2. It will download the correct Gradle wrapper on sync.
+
+Alternatively run:
+   gradle wrapper
+from the android directory after having Gradle installed.
